@@ -488,7 +488,7 @@ class ArkanoidP2P {
             this.setupCanvas();
             
             // Initialize modules
-            this.network = new NetworkModule();
+            this.network = network;
             this.levels = new LevelManager();
             this.game = new Game(this.canvas);
             this.ui = UIController;
