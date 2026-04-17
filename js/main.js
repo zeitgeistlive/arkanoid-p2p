@@ -491,7 +491,7 @@ class ArkanoidP2P {
             this.network = network;
             this.levels = new LevelManager();
             this.game = new Game(this.canvas);
-            this.ui = UIController;
+            this.ui = UIController.init();
             
             // Initialize jitter buffer now that network is available
             this.jitterBuffer = new JitterBuffer({
@@ -604,22 +604,17 @@ class ArkanoidP2P {
     // ============================================================================
     
     setupUICallbacks() {
-        if (!this.ui) return;
-        
-        // Navigation
-        this.ui.on('createRoom', () => this.createRoom());
-        this.ui.on('joinRoom', (code) => this.joinRoom(code));
-        this.ui.on('leaveRoom', () => this.leaveRoom());
-        this.ui.on('startGame', () => this.startGame());
-        
-        // Game controls
-        this.ui.on('pause', () => this.pauseGame());
-        this.ui.on('resume', () => this.resumeGame());
-        this.ui.on('restart', () => this.restartGame());
-        this.ui.on('returnToMenu', () => this.returnToMenu());
-        
-        // Settings
-        this.ui.on('settingsChanged', (settings) => this.applySettings(settings));
+        if (!this.ui || typeof this.ui.setCallbacks !== 'function') return;
+
+        this.ui.setCallbacks({
+            onRoomCreate: () => this.createRoom(),
+            onRoomJoin: (code) => this.joinRoom(code),
+            onGameStart: () => this.startGame(),
+            onGamePause: () => this.pauseGame(),
+            onGameResume: () => this.resumeGame(),
+            onGameRestart: () => this.restartGame(),
+            onGameQuit: () => this.returnToMenu()
+        });
     }
     
     // ============================================================================
