@@ -378,6 +378,7 @@ class ProgressionManager {
     }
     
     unlockAchievement(achievement) {
+        if (this.unlockedAchievements.has(achievement.id)) return;
         this.unlockedAchievements.add(achievement.id);
         console.log(`[Progression] Achievement unlocked: ${achievement.name}`);
         

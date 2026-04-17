@@ -406,13 +406,8 @@ class ArkanoidP2P {
         this.pendingInputs = []; // For guest reconciliation
         
         // ==================== SYNC ENHANCEMENTS ====================
-        // Jitter buffer for smooth state interpolation
-        this.jitterBuffer = new JitterBuffer({
-            minSize: 2,
-            maxSize: 6,
-            maxDelay: 100 + (network.getLatency?.() || 100),
-            smoothingFactor: 0.3
-        });
+        // Jitter buffer for smooth state interpolation (initialized after network setup)
+        this.jitterBuffer = null; // Will be initialized in init()
         
         // Input prediction for guest
         this.inputPredictor = new InputPredictor();
@@ -463,6 +458,18 @@ class ArkanoidP2P {
         console.log('[Main] Initializing...');
         
         try {
+            // Check browser capabilities and show warnings
+            checkBrowserCapabilities();
+            
+            // Setup error boundary
+            this.setupErrorBoundary();
+            
+            // Setup offline detection
+            this.setupOfflineDetection();
+            
+            // Setup keyboard accessibility
+            this.setupAccessibility();
+            
             // Initialize performance monitoring
             if (typeof PerformanceMonitor !== 'undefined') {
                 this.perfMonitor = new PerformanceMonitor();
@@ -485,6 +492,14 @@ class ArkanoidP2P {
             this.levels = new LevelManager();
             this.game = new Game(this.canvas);
             this.ui = new UIController();
+            
+            // Initialize jitter buffer now that network is available
+            this.jitterBuffer = new JitterBuffer({
+                minSize: 2,
+                maxSize: 6,
+                maxDelay: 100 + (this.network.getLatency?.() || 100),
+                smoothingFactor: 0.3
+            });
             
             // Set up performance monitoring for game module
             if (typeof setPerformanceMonitors === 'function') {
@@ -527,10 +542,27 @@ class ArkanoidP2P {
             // Show tutorial for first-time players
             this.showTutorialIfNeeded();
             
+            // Apply saved settings
+            this.applySettings();
+            
             console.log('[Main] Initialization complete');
         } catch (error) {
             console.error('[Main] Initialization failed:', error);
-            this.handleError('Failed to initialize game', error);
+            this.handleFatalError('Failed to initialize game', error);
+        }
+    }
+    
+    applySettings() {
+        // Apply settings from SettingsManager
+        if (typeof SettingsManager !== 'undefined') {
+            const settings = SettingsManager.getAll();
+            
+            // Apply audio volume
+            if (typeof audioSynth !== 'undefined' && audioSynth.setVolume) {
+                audioSynth.setVolume(settings.audioVolume);
+            }
+            
+            console.log('[Main] Settings applied:', settings);
         }
     }
     
@@ -931,7 +963,7 @@ class ArkanoidP2P {
         this.displayBallPosition = { x: 0.5, y: 0.5 };
         
         // Reset sync systems
-        this.jitterBuffer.clear();
+        this.jitterBuffer?.clear();
         this.pendingInputs = [];
         this.inputSequence = 0;
         this.lastAcknowledgedInput = 0;
@@ -1267,8 +1299,10 @@ class ArkanoidP2P {
         
         const { data: state, timestamp, sequence } = message;
         
-        // Add to jitter buffer
-        this.jitterBuffer.add(state, timestamp, sequence || 0);
+        // Add to jitter buffer (skip if not initialized yet)
+        if (this.jitterBuffer) {
+            this.jitterBuffer.add(state, timestamp, sequence || 0);
+        }
         
         // Cache for interpolation
         this.targetState = state;
@@ -1343,7 +1377,7 @@ class ArkanoidP2P {
             }
             
             // Get smoothed state from jitter buffer for guest
-            if (!this.isHost && this.targetState) {
+            if (!this.isHost && this.targetState && this.jitterBuffer) {
                 const bufferedState = this.jitterBuffer.get();
                 if (bufferedState) {
                     this.applyRemoteState(bufferedState);
@@ -1754,4 +1788,230 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
-console.log('[Main] main.js loaded with enhanced P2P sync');
+// ============================================================================
+// ACCESSIBILITY AND ERROR HANDLING HELPERS
+// ============================================================================
+
+/**
+ * Check browser capabilities for P2P connection
+ * Shows warnings if WebRTC or other required features are unavailable
+ */
+function checkBrowserCapabilities() {
+    const warnings = [];
+    
+    // Check WebRTC support
+    const hasWebRTC = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia || 
+                         window.RTCPeerConnection || window.webkitRTCPeerConnection ||
+                         window.mozRTCPeerConnection);
+    
+    if (!hasWebRTC) {
+        warnings.push('Your browser does not support WebRTC P2P connections.');
+        showWebRTCWarning();
+    }
+    
+    // Check localStorage support
+    try {
+        const test = '__storage_test__';
+        localStorage.setItem(test, test);
+        localStorage.removeItem(test);
+    } catch (e) {
+        warnings.push('Local storage is unavailable - progress will not be saved.');
+    }
+    
+    // Check canvas support
+    const canvas = document.createElement('canvas');
+    if (!canvas.getContext || !canvas.getContext('2d')) {
+        warnings.push('Canvas is not supported - game cannot run.');
+    }
+    
+    // Log all warnings
+    if (warnings.length > 0) {
+        console.warn('[Main] Browser capability warnings:', warnings);
+    }
+    
+    return warnings.length === 0;
+}
+
+/**
+ * Show WebRTC warning banner
+ */
+function showWebRTCWarning() {
+    const warning = document.getElementById('webrtc-warning');
+    if (warning) {
+        warning.hidden = false;
+        
+        // Announce to screen readers
+        announceToScreenReader('Warning: Your browser does not support P2P multiplayer connections. Multiplayer features will be unavailable.', true);
+    }
+}
+
+/**
+ * Set up offline/online detection
+ */
+ArkanoidP2P.prototype.setupOfflineDetection = function() {
+    const offlineBanner = document.getElementById('offline-warning');
+    
+    const updateOnlineStatus = () => {
+        const isOnline = navigator.onLine;
+        
+        if (offlineBanner) {
+            offlineBanner.hidden = isOnline;
+        }
+        
+        if (!isOnline) {
+            console.warn('[Main] Connection lost - game will run in offline mode');
+            announceToScreenReader('You are now offline. Some features may not work.', true);
+        } else {
+            console.log('[Main] Connection restored');
+            announceToScreenReader('You are back online.', true);
+        }
+    };
+    
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    
+    // Check initial status
+    updateOnlineStatus();
+};
+
+/**
+ * Set up error boundary for catching unhandled errors
+ */
+ArkanoidP2P.prototype.setupErrorBoundary = function() {
+    const errorBoundary = document.getElementById('error-boundary');
+    const errorMessage = document.getElementById('error-message');
+    const reloadBtn = document.getElementById('btn-reload');
+    
+    // Set up reload button
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', () => {
+            window.location.reload();
+        });
+    }
+    
+    // Global error handler
+    window.addEventListener('error', (e) => {
+        console.error('[Main] Uncaught error:', e.error);
+        this.handleFatalError('An unexpected error occurred', e.error);
+    });
+    
+    // Unhandled promise rejection handler
+    window.addEventListener('unhandledrejection', (e) => {
+        console.error('[Main] Unhandled promise rejection:', e.reason);
+        this.handleFatalError('A promise rejection occurred', e.reason);
+    });
+};
+
+/**
+ * Handle fatal errors - gracefully degrade if possible
+ */
+ArkanoidP2P.prototype.handleFatalError = function(message, error) {
+    console.error('[Main] Fatal error:', message, error);
+    
+    const errorBoundary = document.getElementById('error-boundary');
+    const errorMessage = document.getElementById('error-message');
+    
+    // Display error to user
+    if (errorBoundary && errorMessage) {
+        errorMessage.textContent = `${message}: ${error?.message || error || 'Unknown error'}`;
+        errorBoundary.hidden = false;
+    }
+    
+    // Stop game loop
+    if (this.requestId) {
+        cancelAnimationFrame(this.requestId);
+        this.requestId = null;
+    }
+    
+    // Announce error to screen readers
+    announceToScreenReader(`Error: ${message}. Please reload the page to continue.`, true);
+};
+
+/**
+ * Set up accessibility features
+ */
+ArkanoidP2P.prototype.setupAccessibility = function() {
+    // Manage focus on screen transitions
+    const originalShowScreen = this.ui?.showScreen;
+    if (originalShowScreen) {
+        this.ui.showScreen = (screenName, options) => {
+            originalShowScreen.call(this.ui, screenName, options);
+            
+            // Focus first interactive element after transition
+            setTimeout(() => {
+                const screen = document.getElementById(this.getScreenId(screenName));
+                if (screen) {
+                    const focusable = screen.querySelector('button, [tabindex]:not([tabindex="-1"]), input');
+                    if (focusable) {
+                        focusable.focus();
+                    }
+                }
+            }, 100);
+        };
+    }
+    
+    // Keyboard shortcut help
+    document.addEventListener('keydown', (e) => {
+        // ? key for help
+        if (e.key === '?' && this.state !== APP_STATES.PLAYING) {
+            e.preventDefault();
+            this.showKeyboardShortcuts();
+        }
+    });
+};
+
+/**
+ * Get screen ID from name
+ */
+ArkanoidP2P.prototype.getScreenId = function(screenName) {
+    const screenMap = {
+        'MENU': 'screen-menu',
+        'ROOM': 'screen-room',
+        'GAME': 'screen-game',
+        'PAUSE': 'screen-pause',
+        'LEVEL_COMPLETE': 'screen-level-complete',
+        'GAME_OVER': 'screen-game-over',
+        'LOADING': 'screen-loading',
+        'HELP': 'screen-help'
+    };
+    return screenMap[screenName] || null;
+};
+
+/**
+ * Show keyboard shortcuts
+ */
+ArkanoidP2P.prototype.showKeyboardShortcuts = function() {
+    // Simple alert with shortcuts - could be a nice modal
+    const shortcuts = [
+        'Keyboard Shortcuts:',
+        '',
+        '← ↑ ↓ → or A/D: Move paddle',
+        'Space: Launch ball / Resume',
+        'Escape or P: Pause',
+        'Tab: Navigate UI buttons',
+        'Enter: Activate button',
+        '?: Show this help'
+    ];
+    alert(shortcuts.join('\n'));
+};
+
+/**
+ * Announce message to screen readers
+ */
+function announceToScreenReader(message, assertive = false) {
+    const announcer = document.getElementById('sr-announcer');
+    if (announcer) {
+        announcer.setAttribute('aria-live', assertive ? 'assertive' : 'polite');
+        announcer.textContent = message;
+        
+        // Clear after announcement
+        setTimeout(() => {
+            announcer.textContent = '';
+        }, 1000);
+    }
+}
+
+// Export helper
+window.announceToScreenReader = announceToScreenReader;
+
+console.log('[Main] main.js loaded with enhanced P2P sync, accessibility, and error handling');

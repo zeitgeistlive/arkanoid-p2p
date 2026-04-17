@@ -1355,6 +1355,9 @@ class Game {
             multiball: false
         };
         
+        // Difficulty modifiers
+        this.difficultyModifiers = null;
+        
         // Event callbacks
         this.callbacks = {
             ball_miss: [],

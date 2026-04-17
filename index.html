@@ -9,7 +9,11 @@
   <!-- Theme color for mobile browsers -->
   <meta name="theme-color" content="#0a0a0a">
   <meta name="description" content="GOP-STOP ARKANOID - P2P Cooperative Breakout Game">
+  <meta name="keywords" content="arkanoid, breakout, multiplayer, P2P, WebRTC, retro, game">
   <title>GOP-STOP ARKANOID</title>
+  
+  <!-- Accessibility: High contrast mode support -->
+  <meta name="color-scheme" content="dark">
   
   <!-- Google Fonts - Retro Gaming Style -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,61 +22,399 @@
   
   <!-- Styles -->
   <link rel="stylesheet" href="css/style.css">
+
+<!-- Accessibility Styles -->
+  <style>
+    /* Skip link for keyboard navigation */
+    .skip-link {
+      position: absolute;
+      top: -40px;
+      left: 0;
+      background: var(--neon-cyan, #00ffff);
+      color: var(--bg-primary, #0a0a0a);
+      padding: 8px 16px;
+      text-decoration: none;
+      z-index: 10000;
+      transition: top 0.3s ease;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 12px;
+    }
+    .skip-link:focus {
+      top: 0;
+    }
+    
+    /* Screen reader only content */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0;
+    }
+    
+    /* Offline warning banner */
+    .offline-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #ff5722;
+      color: white;
+      text-align: center;
+      padding: 12px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 10px;
+      z-index: 9999;
+      box-shadow: 0 2px 10px rgba(255, 87, 34, 0.5);
+    }
+    
+    /* WebRTC warning */
+    .webrtc-warning {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #ff3d00;
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 11px;
+      border: 3px solid #ff6e40;
+      z-index: 9998;
+      max-width: 450px;
+      box-shadow: 0 0 30px rgba(255, 61, 0, 0.8);
+    }
+    
+    /* Error boundary */
+    .error-boundary {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(10, 10, 10, 0.97);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+      padding: 20px;
+      text-align: center;
+    }
+    .error-boundary h2 {
+      color: #ff0040;
+      text-shadow: 0 0 20px rgba(255, 0, 64, 0.8);
+      margin-bottom: 20px;
+      font-family: 'Press Start 2P', monospace;
+    }
+    .error-boundary p {
+      color: #ccc;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 14px;
+      margin-bottom: 30px;
+      max-width: 500px;
+    }
+    
+    /* Connection error display */
+    .connection-error {
+      background: rgba(255, 0, 64, 0.2);
+      border: 2px solid #ff0040;
+      color: #ff0040;
+      padding: 12px;
+      margin: 15px 0;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 11px;
+      font-family: 'Share Tech Mono', monospace;
+    }
+    
+    /* Focus visible styles for keyboard navigation */
+    .btn:focus-visible,
+    input:focus-visible,
+    button:focus-visible {
+      outline: 3px solid #00ffff;
+      outline-offset: 3px;
+    }
+    
+    /* Keyboard focus ring for touch controls */
+    .touch-btn:focus-visible {
+      outline: 3px solid #00ffff;
+      outline-offset: 2px;
+    }
+    
+    /* Reduced motion support */
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .spinner {
+        animation: none !important;
+      }
+    }
+    
+    /* High contrast mode support */
+    @media (prefers-contrast: high) {
+      .btn {
+        border-width: 3px;
+      }
+      .hud-value {
+        text-shadow: none;
+        font-weight: bold;
+      }
+      .screen {
+        border: 2px solid white;
+      }
+    }
+  </style>
+  
 </head>
 <body>
 
-  <!-- ============================================
+  <!-- 
+       ACCESSIBILITY FEATURES ADDED:
+       - ARIA labels for all interactive elements
+       - Role attributes for semantic structure
+       - Keyboard navigation support (tabindex)
+       - Screen reader announcements (aria-live)
+       - Skip links for keyboard users
+       
+       ERROR HANDLING:
+       - Offline mode detection container
+       - WebRTC support warning container  
+       - Error boundary display area
+       -->
+  
+  <!-- Skip link for keyboard navigation -->
+  <a href="#game-container" class="skip-link" id="skip-link">Skip to main content</a>
+  
+  <!-- Offline mode warning (hidden when online) -->
+  <div id="offline-warning" class="offline-banner" role="alert" aria-live="polite" hidden>
+    <span aria-hidden="true">📡</span> You are offline. Some features may be limited.
+  </div>
+  
+  <!-- WebRTC support warning (shown if WebRTC unavailable) -->
+  <div id="webrtc-warning" class="webrtc-warning" role="alert" aria-live="assertive" hidden>
+    <span aria-hidden="true">⚠️</span> Your browser doesn't support P2P connections. 
+    Please use a modern browser like Chrome, Firefox, or Edge for multiplayer.
+  </div>
+  
+  <!-- Error boundary display -->
+  <div id="error-boundary" class="error-boundary" role="alert" aria-live="assertive" hidden>
+    <h2>Something went wrong</h2>
+    <p id="error-message">An unexpected error occurred.</p>
+    <button class="btn" id="btn-reload" type="button">Reload Game</button>
+  </div>
+  
+  <!-- Screen reader announcements (visually hidden) -->
+  <div id="sr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  
+  <!-- 
        MAIN GAME CONTAINER
        ============================================ -->
-  <div id="game-container">
+  <div id="game-container" role="main" aria-label="Gop-Stop Arkanoid Game">
     
     <!-- ==========================================
          SCREEN: MAIN MENU
          ========================================== -->
-    <section id="screen-menu" class="screen active">
-      <div class="logo">
-        <h1 class="glitch" data-text="GOP-STOP">GOP-STOP</h1>
-        <div class="logo__subtitle">◆ ARKANOID ◆</div>
+    <section id="screen-menu" class="screen active" role="region" aria-label="Main Menu">
+      <div class="logo" role="banner">
+        <h1 class="glitch" data-text="GOP-STOP" aria-label="GOP-STOP ARKANOID">GOP-STOP</h1>
+        <div class="logo__subtitle" aria-hidden="true">◆ ARKANOID ◆</div>
       </div>
       
-      <div class="menu-buttons">
-        <button class="btn btn--large" id="btn-create-room">
+      <nav class="menu-buttons" role="navigation" aria-label="Main Menu">
+        <button class="btn btn--large" id="btn-create-room" 
+                aria-label="Create a new game room for P2P multiplayer"
+                tabindex="0"
+                type="button">
           CREATE ROOM
         </button>
-        <button class="btn btn--large btn--magenta" id="btn-join-room">
+        <button class="btn btn--large btn--magenta" id="btn-join-room" 
+                aria-label="Join an existing game room using a room code"
+                tabindex="0"
+                type="button">
           JOIN ROOM
         </button>
-        <button class="btn btn--small" id="btn-help" style="margin-top: 20px;">
+        <button class="btn btn--small" id="btn-help" style="margin-top: 20px;"
+                aria-label="View game instructions and controls"
+                tabindex="0"
+                type="button">
           HOW TO PLAY
         </button>
-      </div>
+      </nav>
       
-      <div class="version-tag">v1.0.0 // P2P EDITION</div>
+      <div class="version-tag" aria-label="Version 1.0.0 P2P Edition">v1.0.0 // P2P EDITION</div>
+      
+      <button class="btn btn--small" id="btn-settings" style="position: absolute; top: 20px; right: 20px;"
+              aria-label="Open settings"
+              tabindex="0"
+              type="button">
+        ⚙️ SETTINGS
+      </button>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: SETTINGS
+         ========================================== -->
+    <section id="screen-settings" class="screen" role="region" aria-label="Settings">
+      <div class="room-container" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
+        <h2 id="settings-heading">⚙️ SETTINGS</h2>
+        
+        <div class="settings-content" style="text-align: left; margin: var(--space-lg) 0; line-height: 1.8;" role="form" aria-label="Game Settings">
+          
+          <!-- Audio Volume -->
+          <div class="setting-item" style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary); border-left: 3px solid var(--neon-cyan);">
+            <label for="audio-volume" style="display: block; color: var(--neon-cyan); font-family: var(--font-display); font-size: 10px; margin-bottom: 8px;">
+              🔊 MASTER VOLUME
+            </label>
+            <input type="range" id="audio-volume" min="0" max="100" value="70" style="width: 100%; accent-color: var(--neon-cyan);">
+            <span id="volume-value" style="font-size: 12px; color: #888;">70%</span>
+          </div>
+          
+          <!-- Particle Density -->
+          <div class="setting-item" style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary); border-left: 3px solid var(--neon-magenta);">
+            <legend style="color: var(--neon-magenta); font-family: var(--font-display); font-size: 10px; margin-bottom: 8px; display: block;">
+              ✨ PARTICLE DENSITY
+            </legend>
+            <div role="radiogroup" aria-label="Particle density" style="display: flex; gap: var(--space-sm);">
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="particle-density" value="low" style="accent-color: var(--neon-magenta);">
+                <span style="font-size: 12px;">LOW</span>
+              </label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="particle-density" value="medium" checked style="accent-color: var(--neon-magenta);">
+                <span style="font-size: 12px;">MEDIUM</span>
+              </label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="particle-density" value="high" style="accent-color: var(--neon-magenta);">
+                <span style="font-size: 12px;">HIGH</span>
+              </label>
+            </div>
+          </div>
+          
+          <!-- Difficulty -->
+          <div class="setting-item" style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary); border-left: 3px solid var(--neon-yellow);">
+            <legend style="color: var(--neon-yellow); font-family: var(--font-display); font-size: 10px; margin-bottom: 8px; display: block;">
+              🎮 DIFFICULTY
+            </legend>
+            <div role="radiogroup" aria-label="Game difficulty" style="display: flex; gap: var(--space-sm);">
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="difficulty" value="easy" style="accent-color: var(--neon-yellow);">
+                <span style="font-size: 12px;">EASY</span>
+              </label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="difficulty" value="normal" checked style="accent-color: var(--neon-yellow);">
+                <span style="font-size: 12px;">NORMAL</span>
+              </label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="difficulty" value="hard" style="accent-color: var(--neon-yellow);">
+                <span style="font-size: 12px;">HARD</span>
+              </label>
+            </div>
+            <div id="difficulty-desc" style="font-size: 11px; color: #666; margin-top: 8px; font-style: italic;">
+              Normal: Standard ball speed and block health
+            </div>
+          </div>
+          
+          <!-- Colorblind Mode -->
+          <div class="setting-item" style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary); border-left: 3px solid var(--neon-green);">
+            <label for="colorblind-mode" style="display: block; color: var(--neon-green); font-family: var(--font-display); font-size: 10px; margin-bottom: 8px;">
+              👁️ COLORBLIND MODE
+            </label>
+            <select id="colorblind-mode" style="width: 100%; padding: 8px; background: var(--bg-secondary); color: #fff; border: 2px solid var(--neon-green); font-family: var(--font-body);">
+              <option value="off">Off (Default)</option>
+              <option value="deuteranopia">Deuteranopia (Red-Green)</option>
+              <option value="protanopia">Protanopia (Red-Blind)</option>
+              <option value="tritanopia">Tritanopia (Blue-Blind)</option>
+              <option value="monochrome">Monochrome (Grayscale)</option>
+            </select>
+          </div>
+          
+          <hr style="border: none; border-top: 2px solid var(--bg-tertiary); margin: var(--space-md) 0;">
+          
+          <!-- Save Data Management -->
+          <div class="setting-group" style="margin-bottom: var(--space-md);">
+            <h3 style="color: #888; font-family: var(--font-display); font-size: 12px; margin-bottom: var(--space-sm);">
+              💾 SAVE DATA
+            </h3>
+            
+            <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap; margin-bottom: var(--space-sm);">
+              <button class="btn btn--small" id="btn-export-save" type="button">
+                ⬇️ EXPORT SAVE
+              </button>
+              <button class="btn btn--small btn--magenta" id="btn-import-save" type="button">
+                ⬆️ IMPORT SAVE
+              </button>
+            </div>
+            
+            <div style="background: rgba(255, 0, 64, 0.1); border: 2px solid #ff0040; padding: var(--space-sm); border-radius: 4px;">
+              <h4 style="color: #ff0040; font-size: 11px; margin-bottom: 8px;">⚠️ DANGER ZONE</h4>
+              <button class="btn btn--small" id="btn-reset-progress" style="border-color: #ff0040; color: #ff0040;" type="button">
+                Reset All Progress
+              </button>
+            </div>
+          </div>
+          
+          <!-- Import Save Dialog (hidden by default) -->
+          <div id="import-dialog" style="display: none; margin-top: var(--space-md); padding: var(--space-sm); background: var(--bg-secondary); border-radius: 4px;">
+            <label for="import-text" style="display: block; font-size: 11px; color: #888; margin-bottom: 8px;">
+              Paste your save data here:
+            </label>
+            <textarea id="import-text" rows="4" style="width: 100%; padding: 8px; background: var(--bg-primary); color: #fff; border: 2px solid var(--neon-magenta); font-family: monospace; font-size: 12px; resize: vertical;"></textarea>
+            <div style="display: flex; gap: var(--space-sm); margin-top: 8px;">
+              <button class="btn btn--small" id="btn-confirm-import" type="button">Import</button>
+              <button class="btn btn--small" id="btn-cancel-import" type="button">Cancel</button>
+            </div>
+            <div id="import-status" style="margin-top: 8px; font-size: 11px;"></div>
+          </div>
+          
+        </div>
+        
+        <button class="btn btn--large" id="btn-settings-back" style="width: 100%;"
+                aria-label="Return to main menu"
+                type="button">
+          BACK
+        </button>
+      </div>
     </section>
     
     <!-- ==========================================
          SCREEN: ROOM CREATION
          ========================================== -->
-    <section id="screen-room" class="screen">
+    <section id="screen-room" class="screen" role="region" aria-label="Room Management" aria-live="polite">
       <div class="room-container">
         <!-- Create Room Section -->
-        <div class="room-section" id="create-section">
-          <h2>CREATE ROOM</h2>
+        <div class="room-section" id="create-section" role="group" aria-label="Create Room">
+          <h2 id="create-room-heading">CREATE ROOM</h2>
           <p style="color: #888; margin-bottom: var(--space-md);">
             Generate a room code and share it with your comrade
           </p>
-          <button class="btn btn--large" id="btn-generate-code">
+          <button class="btn btn--large" id="btn-generate-code" 
+                  aria-describedby="create-room-heading"
+                  aria-label="Generate a new room code"
+                  type="button">
             GENERATE CODE
           </button>
         </div>
         
         <!-- Join Room Section -->
-        <div class="room-section hidden" id="join-section">
-          <h2>JOIN ROOM</h2>
+        <div class="room-section hidden" id="join-section" role="group" aria-label="Join Room">
+          <h2 id="join-room-heading">JOIN ROOM</h2>
           <p style="color: #888; margin-bottom: var(--space-md);">
             Enter the room code from your comrade
           </p>
           <div style="margin-bottom: var(--space-md);">
+            <label for="room-code-input" id="room-code-label" class="sr-only">Room Code</label>
             <input 
               type="text" 
               class="input" 
@@ -80,32 +422,48 @@
               placeholder="ENTER CODE"
               maxlength="8"
               autocomplete="off"
+              aria-labelledby="join-room-heading room-code-label"
+              aria-describedby="room-code-help"
+              aria-required="true"
+              tabindex="0"
             >
+            <span id="room-code-help" class="sr-only">Enter an 8-character room code to join</span>
           </div>
-          <button class="btn btn--large btn--magenta" id="btn-connect">
+          <button class="btn btn--large btn--magenta" id="btn-connect"
+                  aria-label="Connect to the room"
+                  type="button">
             CONNECT
           </button>
         </div>
         
-        <div class="divider"></div>
+        <div class="divider" role="separator" aria-hidden="true"></div>
         
         <!-- Room Code Display -->
-        <div class="room-code-display hidden" id="code-display">
-          <div class="room-code-label">YOUR ROOM CODE</div>
-          <div class="room-code" id="generated-code">--------</div>
-          <button class="btn btn--small" id="btn-copy-code" style="margin-top: 10px;">
+        <div class="room-code-display hidden" id="code-display" role="region" aria-label="Room Code Display" aria-live="polite">
+          <div class="room-code-label" id="code-label">YOUR ROOM CODE</div>
+          <div class="room-code" id="generated-code" role="text" aria-labelledby="code-label" aria-live="polite">--------</div>
+          <button class="btn btn--small" id="btn-copy-code" style="margin-top: 10px;"
+                  aria-label="Copy room code to clipboard"
+                  type="button">
             COPY TO CLIPBOARD
           </button>
         </div>
         
         <!-- Connection Status -->
-        <div class="connection-status">
-          <div class="status-dot" id="connection-dot"></div>
+        <div class="connection-status" role="status" aria-live="polite" aria-label="Connection Status">
+          <div class="status-dot" id="connection-dot" aria-hidden="true"></div>
           <span id="connection-text">WAITING FOR CONNECTION...</span>
         </div>
         
+        <!-- Connection Error Display -->
+        <div id="connection-error" class="connection-error" role="alert" aria-live="assertive" hidden>
+          <span aria-hidden="true">❌</span> <span id="connection-error-text">Connection failed</span>
+        </div>
+        
         <!-- Back Button -->
-        <button class="btn" id="btn-back-to-menu" style="margin-top: var(--space-md); width: 100%;">
+        <button class="btn" id="btn-back-to-menu" style="margin-top: var(--space-md); width: 100%;"
+                aria-label="Return to main menu"
+                type="button">
           BACK TO MENU
         </button>
       </div>
@@ -114,29 +472,29 @@
     <!-- ==========================================
          SCREEN: GAME HUD
          ========================================== -->
-    <section id="screen-game" class="screen">
+    <section id="screen-game" class="screen" role="region" aria-label="Game Screen" aria-live="polite">
       <div class="game-layout">
         <!-- HUD Header -->
-        <header class="hud">
+        <header class="hud" role="banner" aria-label="Game Status">
           <div class="hud-section">
             <div class="hud-item">
-              <div class="hud-label">SCORE</div>
-              <div class="hud-value" id="score-display">000000</div>
+              <div class="hud-label" id="score-label">SCORE</div>
+              <div class="hud-value" id="score-display" role="text" aria-labelledby="score-label" aria-live="polite">000000</div>
             </div>
             <div class="hud-item">
-              <div class="hud-label">LEVEL</div>
-              <div class="hud-value" id="level-display">01</div>
+              <div class="hud-label" id="level-label">LEVEL</div>
+              <div class="hud-value" id="level-display" role="text" aria-labelledby="level-label">01</div>
             </div>
           </div>
           
-          <div class="hud-section">
-            <div class="player-indicator player-indicator--active" id="player-1-indicator">
-              <span class="player-indicator__num">P1</span>
+          <div class="hud-section" role="group" aria-label="Player Status">
+            <div class="player-indicator player-indicator--active" id="player-1-indicator" role="status" aria-label="Your status: Active">
+              <span class="player-indicator__num" aria-hidden="true">P1</span>
               <span class="player-indicator__name">YOU</span>
-              <span class="player-indicator__status"></span>
+              <span class="player-indicator__status" aria-label="Connected"></span>
             </div>
-            <div class="player-indicator" id="player-2-indicator">
-              <span class="player-indicator__num">P2</span>
+            <div class="player-indicator" id="player-2-indicator" role="status" aria-label="Player 2 status: Waiting">
+              <span class="player-indicator__num" aria-hidden="true">P2</span>
               <span class="player-indicator__name">COMRADE</span>
               <span class="player-indicator__status"></span>
             </div>
@@ -144,55 +502,92 @@
           
           <div class="hud-section">
             <div class="hud-item">
-              <div class="hud-label">LIVES</div>
-              <div class="hud-value text-magenta" id="lives-display">♥♥♥</div>
+              <div class="hud-label" id="lives-label">LIVES</div>
+              <div class="hud-value text-magenta" id="lives-display" role="text" aria-labelledby="lives-label" aria-live="polite">♥♥♥</div>
             </div>
-            <button class="btn btn--small" id="btn-pause">PAUSE</button>
-            <button class="btn btn--small" id="btn-mute" title="Toggle Mute">🔊</button>
+            <button class="btn btn--small" id="btn-pause"
+                    aria-label="Pause game (Escape key)"
+                    title="Pause Game (Escape key)"
+                    type="button">
+              PAUSE
+            </button>
+            <button class="btn btn--small" id="btn-mute" 
+                    aria-label="Toggle sound on/off"
+                    title="Toggle Mute"
+                    type="button">
+              <span aria-hidden="true">🔊</span>
+            </button>
           </div>
         </header>
         
         <!-- Game Canvas -->
-        <div class="canvas-container">
-          <canvas id="gameCanvas" width="800" height="600"></canvas>
-          <div class="canvas-border"></div>
+        <div class="canvas-container" role="application" aria-label="Game Canvas">
+          <!-- Screen reader description of game state -->
+          <div id="game-state-description" class="sr-only" aria-live="assertive" aria-atomic="false"></div>
+          <canvas id="gameCanvas" width="800" height="600"
+                  tabindex="0"
+                  role="img"
+                  aria-label="Arkanoid game display. Use arrow keys or A/D to move paddle. Space to launch ball.">
+          </canvas>
+          <div class="canvas-border" aria-hidden="true"></div>
         </div>
       </div>
       
       <!-- Touch Controls for Mobile -->
-      <div class="touch-controls">
-        <button class="touch-btn" id="touch-left">←</button>
-        <button class="touch-btn" id="touch-right">→</button>
+      <div class="touch-controls" role="group" aria-label="Touch Controls">
+        <button class="touch-btn" id="touch-left"
+                aria-label="Move paddle left"
+                type="button">
+          <span aria-hidden="true">←</span>
+        </button>
+        <button class="touch-btn" id="touch-right"
+                aria-label="Move paddle right"
+                type="button">
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
+      
+      <!-- Keyboard shortcuts help -->
+      <div class="keyboard-help sr-only" role="note">
+        <h3>Keyboard Controls</h3>
+        <ul>
+          <li>Left Arrow or A: Move paddle left</li>
+          <li>Right Arrow or D: Move paddle right</li>
+          <li>Space: Launch ball / Resume</li>
+          <li>Escape or P: Pause game</li>
+        </ul>
       </div>
     </section>
     
     <!-- ==========================================
          SCREEN: LEVEL COMPLETE
          ========================================== -->
-    <section id="screen-level-complete" class="screen">
+    <section id="screen-level-complete" class="screen" role="region" aria-label="Level Complete" aria-live="polite">
       <div class="end-screen-content">
         <h2 class="end-screen-title">LEVEL COMPLETE!</h2>
         
-        <div class="stats-display">
+        <div class="stats-display" role="group" aria-label="Level Statistics">
           <div class="stat-item">
-            <div class="stat-value" id="level-score">0</div>
-            <div class="stat-label">Level Score</div>
+            <div class="stat-value" id="level-score" role="text" aria-label="Level score">0</div>
+            <div class="stat-label" id="score-stat-label">Level Score</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value" id="level-blocks">0</div>
-            <div class="stat-label">Blocks Destroyed</div>
+            <div class="stat-value" id="level-blocks" role="text" aria-label="Blocks destroyed">0</div>
+            <div class="stat-label" id="blocks-stat-label">Blocks Destroyed</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value" id="level-time">00:00</div>
-            <div class="stat-label">Time</div>
+            <div class="stat-value" id="level-time" role="text" aria-label="Time taken">00:00</div>
+            <div class="stat-label" id="time-stat-label">Time</div>
           </div>
         </div>
         
-        <p style="margin-bottom: var(--space-lg); color: #888;">
+        <p style="margin-bottom: var(--space-lg); color: #888;" role="status" aria-live="polite">
           Excellent work, comrade! Ready for next level?
         </p>
         
-        <button class="btn btn--large btn--yellow" id="btn-next-level">
+        <button class="btn btn--large btn--yellow" id="btn-next-level"
+                aria-label="Start next level"
+                type="button">
           NEXT LEVEL
         </button>
       </div>
@@ -201,34 +596,38 @@
     <!-- ==========================================
          SCREEN: GAME OVER
          ========================================== -->
-    <section id="screen-game-over" class="screen">
+    <section id="screen-game-over" class="screen" role="region" aria-label="Game Over">
       <div class="end-screen-content">
-        <h2 class="end-screen-title glitch" data-text="GAME OVER">GAME OVER</h2>
+        <h2 class="end-screen-title glitch" data-text="GAME OVER" aria-live="assertive">GAME OVER</h2>
         
-        <div class="stats-display">
+        <div class="stats-display" role="group" aria-label="Final Statistics">
           <div class="stat-item">
-            <div class="stat-value" id="final-score">0</div>
-            <div class="stat-label">Final Score</div>
+            <div class="stat-value" id="final-score" role="text" aria-label="Final score">0</div>
+            <div class="stat-label" id="final-score-label">Final Score</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value" id="final-level">1</div>
-            <div class="stat-label">Level Reached</div>
+            <div class="stat-value" id="final-level" role="text" aria-label="Level reached">1</div>
+            <div class="stat-label" id="final-level-label">Level Reached</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value" id="high-score">0</div>
-            <div class="stat-label">High Score</div>
+            <div class="stat-value" id="high-score" role="text" aria-label="High score">0</div>
+            <div class="stat-label" id="high-score-label">High Score</div>
           </div>
         </div>
         
-        <p style="margin-bottom: var(--space-lg); color: #888;">
+        <p style="margin-bottom: var(--space-lg); color: #888;" role="status" aria-live="polite">
           Mission failed. The revolution continues...
         </p>
         
-        <div style="display: flex; gap: var(--space-md); flex-wrap: wrap; justify-content: center;">
-          <button class="btn btn--large" id="btn-retry">
+        <div style="display: flex; gap: var(--space-md); flex-wrap: wrap; justify-content: center;" role="group" aria-label="Game Over Options">
+          <button class="btn btn--large" id="btn-retry"
+                  aria-label="Try again from beginning"
+                  type="button">
             TRY AGAIN
           </button>
-          <button class="btn btn--large btn--magenta" id="btn-main-menu">
+          <button class="btn btn--large btn--magenta" id="btn-main-menu"
+                  aria-label="Return to main menu"
+                  type="button">
             MAIN MENU
           </button>
         </div>
@@ -238,19 +637,28 @@
     <!-- ==========================================
          SCREEN: PAUSE
          ========================================== -->
-    <section id="screen-pause" class="screen" style="background: rgba(10, 10, 10, 0.9);">
+    <section id="screen-pause" class="screen" style="background: rgba(10, 10, 10, 0.9);" role="region" aria-label="Game Paused">
       <div class="end-screen-content" style="border-color: var(--neon-cyan);">
-        <h2 style="color: var(--neon-cyan); text-shadow: var(--glow-medium) var(--neon-cyan);">
+        <h2 style="color: var(--neon-cyan); text-shadow: var(--glow-medium) var(--neon-cyan);" aria-live="polite">
           PAUSED
         </h2>
-        <div style="margin: var(--space-xl) 0;">
-          <button class="btn btn--large" id="btn-resume" style="margin-bottom: var(--space-md);">
+        <div style="margin: var(--space-xl) 0;" role="group" aria-label="Pause Menu Options">
+          <button class="btn btn--large" id="btn-resume" style="margin-bottom: var(--space-md);"
+                  aria-label="Resume game (Space or Escape key)"
+                  type="button">
             RESUME
           </button>
           <br>
-          <button class="btn" id="btn-quit-game">
+          <button class="btn" id="btn-quit-game"
+                  aria-label="Quit game and return to menu"
+                  type="button">
             QUIT TO MENU
           </button>
+        </div>
+        
+        <!-- Keyboard shortcuts in pause menu -->
+        <div role="note" class="sr-only" aria-label="Available keyboard shortcuts">
+          Press Space or Escape to resume. Press Q to quit.
         </div>
       </div>
     </section>
@@ -258,43 +666,58 @@
     <!-- ==========================================
          SCREEN: LOADING
          ========================================== -->
-    <section id="screen-loading" class="screen">
-      <div class="loading">
-        <div class="spinner"></div>
-        <div class="loading-text" id="loading-text">CONNECTING...</div>
+    <section id="screen-loading" class="screen" role="region" aria-label="Loading Screen" aria-live="polite">
+      <div class="loading" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="loading-text" id="loading-progress">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="loading-text" id="loading-text" aria-live="polite">CONNECTING...</div>
+      </div>
+      
+      <!-- Loading status for screen readers -->
+      <div id="loading-status" class="sr-only" aria-live="assertive" aria-atomic="true">
+        Please wait while the game connects
       </div>
     </section>
     
     <!-- ==========================================
          SCREEN: HELP / INSTRUCTIONS
          ========================================== -->
-    <section id="screen-help" class="screen">
+    <section id="screen-help" class="screen" role="region" aria-label="How to Play">
       <div class="room-container" style="max-width: 600px;">
-        <h2>HOW TO PLAY</h2>
+        <h2 id="help-heading">HOW TO PLAY</h2>
         
-        <div style="text-align: left; margin: var(--space-lg) 0; line-height: 1.8;">
-          <h3 style="color: var(--neon-cyan);">◆ CONTROLS</h3>
-          <p style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary);">
+        <div style="text-align: left; margin: var(--space-lg) 0; line-height: 1.8;" role="region" aria-label="Game Instructions">
+          <h3 style="color: var(--neon-cyan);" id="controls-heading">◆ CONTROLS</h3>
+          <p style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary);" role="region" aria-labelledby="controls-heading">
             <strong>← → Arrow Keys / A D:</strong> Move paddle<br>
-            <strong>SPACE:</strong> Launch ball / Pause
+            <strong>SPACE:</strong> Launch ball / Resume game<br>
+            <strong>ESCAPE or P:</strong> Pause game during play
           </p>
           
-          <h3 style="color: var(--neon-magenta);">◆ OBJECTIVE</h3>
-          <p style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary);">
+          <h3 style="color: var(--neon-magenta);" id="objective-heading">◆ OBJECTIVE</h3>
+          <p style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary);" role="region" aria-labelledby="objective-heading">
             Cooperate with your comrade to destroy all blocks.<br>
             Two paddles, one ball, shared lives!<br>
             Don't let the ball fall below the paddles.
           </p>
           
-          <h3 style="color: var(--neon-yellow);">◆ MULTIPLAYER</h3>
-          <p style="padding: var(--space-sm); background: var(--bg-primary);">
+          <h3 style="color: var(--neon-yellow);" id="multiplayer-heading">◆ MULTIPLAYER</h3>
+          <p style="padding: var(--space-sm); background: var(--bg-primary);" role="region" aria-labelledby="multiplayer-heading">
             Create a room and share the code with a friend.<br>
             Or join using their room code.<br>
             Connection is P2P via WebRTC - no servers needed!
           </p>
+          
+          <h3 style="color: var(--neon-green);" id="accessibility-heading">◆ ACCESSIBILITY</h3>
+          <p style="padding: var(--space-sm); background: var(--bg-primary);" role="region" aria-labelledby="accessibility-heading">
+            The game supports keyboard navigation with Tab and Enter keys.<br>
+            Screen reader announcements are provided for game events.<br>
+            Press Escape to quickly access the pause menu.
+          </p>
         </div>
         
-        <button class="btn btn--large" id="btn-help-back" style="width: 100%;">
+        <button class="btn btn--large" id="btn-help-back" style="width: 100%;"
+                aria-label="Return to main menu"
+                type="button">
           BACK
         </button>
       </div>
@@ -306,6 +729,7 @@
        JAVASCRIPT
        ============================================ -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="js/settings.js"></script>
   <script src="js/performance.js"></script>
   <script src="js/progression.js"></script>
   <script src="js/network.js"></script>
@@ -315,14 +739,22 @@
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
   
-  <!-- Screen management helper (will be expanded by game.js) -->
+  <!-- Screen management helper with accessibility support -->
   <script>
     // Screen navigation helper
     window.showScreen = function(screenId) {
       document.querySelectorAll('.screen').forEach(screen => {
         screen.classList.remove('active');
       });
-      document.getElementById(screenId).classList.add('active');
+      const target = document.getElementById(screenId);
+      if (target) {
+        target.classList.add('active');
+        // Focus management for accessibility
+        setTimeout(() => {
+          const focusable = target.querySelector('button, [tabindex]:not([tabindex="-1"]), input');
+          if (focusable) focusable.focus();
+        }, 100);
+      }
     };
     
     // Button event listeners for navigation
@@ -389,6 +821,11 @@
         document.getElementById('code-display').classList.remove('hidden');
         document.getElementById('connection-dot').classList.add('status-dot--waiting');
         document.getElementById('connection-text').textContent = 'WAITING FOR PLAYER 2...';
+        
+        // Announce to screen readers
+        if (typeof window.announceToScreenReader === 'function') {
+          window.announceToScreenReader('Room code generated. Waiting for player 2 to connect.');
+        }
       });
       
       // Copy code - BUG FIX #4: Added fallback for browsers without clipboard API
@@ -437,10 +874,237 @@
         const btn = document.getElementById('btn-copy-code');
         const originalText = btn.textContent;
         btn.textContent = copied ? 'COPIED!' : 'SELECTED - COPY MANUALLY';
+        
+        // Announce to screen readers
+        if (typeof window.announceToScreenReader === 'function') {
+          window.announceToScreenReader(copied ? 'Room code copied to clipboard' : 'Room code selected. Please copy manually.');
+        }
+        
         setTimeout(() => btn.textContent = originalText, 2000);
       });
+      
+      // Settings event handlers
+      document.getElementById('btn-settings')?.addEventListener('click', () => {
+        loadSettingsToUI();
+        showScreen('screen-settings');
+      });
+      
+      document.getElementById('btn-settings-back')?.addEventListener('click', () => {
+        showScreen('screen-menu');
+      });
+      
+      // Volume slider
+      const volumeSlider = document.getElementById('audio-volume');
+      const volumeValue = document.getElementById('volume-value');
+      volumeSlider?.addEventListener('input', (e) => {
+        const vol = e.target.value / 100;
+        volumeValue.textContent = e.target.value + '%';
+        if (typeof SettingsManager !== 'undefined') {
+          SettingsManager.set('audioVolume', vol);
+        }
+        if (typeof audioSynth !== 'undefined') {
+          audioSynth.setVolume(vol);
+        }
+      });
+      
+      // Particle density
+      document.querySelectorAll('input[name="particle-density"]').forEach(radio => {
+        radio?.addEventListener('change', (e) => {
+          if (e.target.checked && typeof SettingsManager !== 'undefined') {
+            SettingsManager.set('particleDensity', e.target.value);
+          }
+        });
+      });
+      
+      // Difficulty
+      const difficultyDesc = document.getElementById('difficulty-desc');
+      const difficultyDescs = {
+        easy: 'Easy: Slower ball, weaker blocks, extra lives',
+        normal: 'Normal: Standard ball speed and block health',
+        hard: 'Hard: Fast ball, stronger blocks, fewer lives'
+      };
+      document.querySelectorAll('input[name="difficulty"]').forEach(radio => {
+        radio?.addEventListener('change', (e) => {
+          if (e.target.checked && typeof SettingsManager !== 'undefined') {
+            SettingsManager.set('difficulty', e.target.value);
+            difficultyDesc.textContent = difficultyDescs[e.target.value];
+          }
+        });
+      });
+      
+      // Colorblind mode
+      document.getElementById('colorblind-mode')?.addEventListener('change', (e) => {
+        if (typeof SettingsManager !== 'undefined') {
+          SettingsManager.set('colorblindMode', e.target.value);
+        }
+      });
+      
+      // Export save
+      document.getElementById('btn-export-save')?.addEventListener('click', async () => {
+        try {
+          let data = {};
+          // Get progression data
+          if (typeof window.progressionManager !== 'undefined' && window.progressionManager.exportProgress) {
+            const progress = window.progressionManager.exportProgress();
+            if (progress) data.progress = progress;
+          }
+          // Get settings data
+          if (typeof SettingsManager !== 'undefined') {
+            data.settings = SettingsManager.getAll();
+          }
+          
+          const jsonData = JSON.stringify(data, null, 2);
+          
+          // Try to copy to clipboard
+          let copied = false;
+          if (navigator.clipboard && window.isSecureContext) {
+            try {
+              await navigator.clipboard.writeText(jsonData);
+              copied = true;
+            } catch (err) {
+              console.warn('Clipboard failed:', err);
+            }
+          }
+          
+          if (copied) {
+            alert('Save data copied to clipboard!');
+          } else {
+            // Show in dialog
+            const ta = document.createElement('textarea');
+            ta.value = jsonData;
+            ta.style.width = '90%';
+            ta.style.height = '200px';
+            ta.style.fontFamily = 'monospace';
+            ta.style.fontSize = '12px';
+            ta.readOnly = true;
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode('Copy this data:'));
+            div.appendChild(ta);
+            const d = document.createElement('dialog');
+            d.appendChild(div);
+            const btn = document.createElement('button');
+            btn.textContent = 'Close';
+            btn.className = 'btn btn--small';
+            btn.onclick = () => d.close();
+            div.appendChild(btn);
+            document.body.appendChild(d);
+            d.showModal();
+          }
+        } catch (e) {
+          alert('Failed to export save: ' + e.message);
+        }
+      });
+      
+      // Import save
+      const importDialog = document.getElementById('import-dialog');
+      const importStatus = document.getElementById('import-status');
+      
+      document.getElementById('btn-import-save')?.addEventListener('click', () => {
+        importDialog.style.display = 'block';
+        document.getElementById('import-text').focus();
+      });
+      
+      document.getElementById('btn-cancel-import')?.addEventListener('click', () => {
+        importDialog.style.display = 'none';
+        document.getElementById('import-text').value = '';
+        importStatus.textContent = '';
+      });
+      
+      document.getElementById('btn-confirm-import')?.addEventListener('click', () => {
+        const text = document.getElementById('import-text').value.trim();
+        if (!text) {
+          importStatus.textContent = 'Please paste save data';
+          importStatus.style.color = '#ff0040';
+          return;
+        }
+        
+        try {
+          const data = JSON.parse(text);
+          
+          // Import progression
+          if (data.progress && typeof window.progressionManager !== 'undefined' && window.progressionManager.importProgress) {
+            window.progressionManager.importProgress(data.progress);
+          }
+          
+          // Import settings
+          if (data.settings && typeof SettingsManager !== 'undefined') {
+            for (const [key, value] of Object.entries(data.settings)) {
+              SettingsManager.set(key, value);
+            }
+            loadSettingsToUI();
+          }
+          
+          importStatus.textContent = '✅ Save imported successfully!';
+          importStatus.style.color = '#00ff00';
+          setTimeout(() => {
+            importDialog.style.display = 'none';
+            document.getElementById('import-text').value = '';
+            importStatus.textContent = '';
+          }, 1500);
+        } catch (e) {
+          importStatus.textContent = '❌ Invalid save data: ' + e.message;
+          importStatus.style.color = '#ff0040';
+        }
+      });
+      
+      // Reset progress
+      document.getElementById('btn-reset-progress')?.addEventListener('click', () => {
+        if (confirm('⚠️ WARNING!\n\nThis will delete ALL your progress including:\n- All achievements\n- High scores\n- Unlocked levels\n\nAre you sure you want to continue?')) {
+          // Reset progression
+          if (typeof window.progressionManager !== 'undefined' && window.progressionManager.resetAll) {
+            window.progressionManager.resetAll();
+          }
+          // Reset settings
+          if (typeof SettingsManager !== 'undefined') {
+            SettingsManager.resetToDefaults();
+            loadSettingsToUI();
+          }
+          // Clear localStorage
+          try {
+            localStorage.removeItem('arkanoid_highscores');
+            localStorage.removeItem('arkanoid_achievements');
+            localStorage.removeItem('arkanoid_progress');
+            localStorage.removeItem('ark_progression');
+          } catch (e) {
+            console.warn('Error clearing localStorage:', e);
+          }
+          alert('All progress has been reset!');
+        }
+      });
+      
+      // Load saved settings to UI
+      function loadSettingsToUI() {
+        if (typeof SettingsManager === 'undefined') return;
+        
+        const settings = SettingsManager.getAll();
+        
+        // Volume
+        if (volumeSlider) {
+          volumeSlider.value = Math.round(settings.audioVolume * 100);
+          if (volumeValue) volumeValue.textContent = Math.round(settings.audioVolume * 100) + '%';
+        }
+        
+        // Particle density
+        document.querySelectorAll('input[name="particle-density"]').forEach(radio => {
+          radio.checked = radio.value === settings.particleDensity;
+        });
+        
+        // Difficulty
+        document.querySelectorAll('input[name="difficulty"]').forEach(radio => {
+          radio.checked = radio.value === settings.difficulty;
+        });
+        if (difficultyDesc) difficultyDesc.textContent = difficultyDescs[settings.difficulty] || difficultyDescs.normal;
+        
+        // Colorblind
+        const cbSelect = document.getElementById('colorblind-mode');
+        if (cbSelect) cbSelect.value = settings.colorblindMode;
+      }
+      
+      // Initialize settings on load
+      loadSettingsToUI();
     });
   </script>
   
 </body>
 </html>
+</content>

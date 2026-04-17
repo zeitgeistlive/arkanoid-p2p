@@ -669,6 +669,178 @@ p {
   background: var(--bg-secondary);
 }
 
+/* Settings button in menu */
+#btn-settings {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 100;
+}
+
+/* ============================================
+   SETTINGS SCREEN
+   ============================================ */
+
+#screen-settings {
+  background: var(--bg-primary);
+  padding: var(--space-lg);
+}
+
+#screen-settings .room-container {
+  max-width: 600px;
+  width: 95%;
+  max-height: 90vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--neon-cyan) var(--bg-secondary);
+}
+
+#screen-settings .room-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+#screen-settings .room-container::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+#screen-settings .room-container::-webkit-scrollbar-thumb {
+  background: var(--neon-cyan);
+  border-radius: 4px;
+}
+
+.setting-item {
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm);
+  background: var(--bg-primary);
+  border-left: 3px solid var(--neon-cyan);
+  transition: border-color 0.3s ease;
+}
+
+.setting-item:hover {
+  border-left-width: 5px;
+}
+
+.setting-item input[type="range"] {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.setting-item input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 10px var(--neon-cyan);
+}
+
+.setting-item input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 10px var(--neon-cyan);
+  border: none;
+}
+
+.setting-item select {
+  width: 100%;
+  padding: 10px 15px;
+  background: var(--bg-secondary);
+  color: #fff;
+  border: 2px solid var(--neon-green);
+  font-family: var(--font-body);
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.3s ease;
+}
+
+.setting-item select:focus {
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+}
+
+.setting-group {
+  margin-bottom: var(--space-md);
+}
+
+.setting-group h3 {
+  color: #888;
+  font-family: var(--font-display);
+  font-size: 12px;
+  margin-bottom: var(--space-sm);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+/* Danger zone styling */
+.danger-zone {
+  background: rgba(255, 0, 64, 0.1);
+  border: 2px solid #ff0040;
+  padding: var(--space-sm);
+  border-radius: 4px;
+  margin-top: var(--space-md);
+}
+
+.danger-zone h4 {
+  color: #ff0040;
+  font-size: 11px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.danger-zone .btn {
+  border-color: #ff0040;
+  color: #ff0040;
+}
+
+.danger-zone .btn:hover {
+  background: #ff0040;
+  color: var(--bg-primary);
+}
+
+/* Import dialog */
+#import-dialog {
+  display: none;
+  margin-top: var(--space-md);
+  padding: var(--space-sm);
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  border: 1px solid var(--neon-magenta);
+}
+
+#import-dialog textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 8px;
+  background: var(--bg-primary);
+  color: #fff;
+  border: 2px solid var(--neon-magenta);
+  font-family: monospace;
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
+}
+
+#import-dialog textarea:focus {
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.3);
+}
+
+#import-status {
+  margin-top: 8px;
+  font-size: 11px;
+  min-height: 16px;
+}
+
 /* ============================================
    ROOM SCREEN (Create/Join)
    ============================================ */

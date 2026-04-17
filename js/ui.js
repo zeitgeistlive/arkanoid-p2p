@@ -20,7 +20,8 @@ const UIController = (function() {
         LEVEL_COMPLETE: 'screen-level-complete',
         GAME_OVER: 'screen-game-over',
         LOADING: 'screen-loading',
-        HELP: 'screen-help'
+        HELP: 'screen-help',
+        SETTINGS: 'screen-settings'
     };
 
     const CONNECTION_STATUS = {
@@ -84,7 +85,7 @@ const UIController = (function() {
      * @param {Object} options - Callback functions
      */
     function init(options = {}) {
-        console.log('[UI] Initializing...');
+        console.log('[UI] Initializing with accessibility...');
 
         // Store callbacks
         Object.assign(callbacks, options);
@@ -95,8 +96,11 @@ const UIController = (function() {
         // Set up event listeners
         setupEventListeners();
 
-        // Set up keyboard shortcuts
+        // Set up keyboard shortcuts with proper focus management
         setupKeyboardShortcuts();
+        
+        // Set up accessible focus traps for modals
+        setupFocusTraps();
 
         // Set up touch controls
         setupTouchControls();
@@ -104,19 +108,112 @@ const UIController = (function() {
         // Set up mouse/pointer controls
         setupMouseControls();
 
-        // Add button ripple effects
+        // Add button ripple effects with keyboard support
         addRippleEffects();
 
         // Initialize loading screen elements
         initLoadingScreen();
+        
+        // Initialize accessibility announcements
+        initAccessibility();
 
-        // Show initial screen
+        // Show initial screen and manage focus
         showScreen('MENU', { eager: true });
+        setTimeout(() => focusFirstInteractive('screen-menu'), 100);
 
         // Set up network event listeners if network module exists
         setupNetworkIntegration();
 
-        console.log('[UI] Initialized');
+        console.log('[UI] Initialized with keyboard navigation and ARIA support');
+    }
+
+    /**
+     * Initialize accessibility features
+     */
+    function initAccessibility() {
+        // Ensure all buttons have proper types for accessibility
+        document.querySelectorAll('button:not([type])').forEach(btn => {
+            btn.setAttribute('type', 'button');
+        });
+        
+        // Add ARIA landmarks if missing
+        const container = document.getElementById('game-container');
+        if (container && !container.getAttribute('role')) {
+            container.setAttribute('role', 'main');
+        }
+        
+        // Initialize skip link behavior
+        const skipLink = document.getElementById('skip-link');
+        if (skipLink) {
+            skipLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                focusFirstInteractive(state.currentScreen ? `screen-${state.currentScreen.toLowerCase()}` : 'screen-menu');
+            });
+        }
+    }
+
+    /**
+     * Focus first interactive element in a container
+     */
+    function focusFirstInteractive(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const focusable = container.querySelector(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        
+        if (focusable) {
+            focusable.focus();
+        }
+    }
+
+    /**
+     * Set up focus traps for modal screens
+     */
+    function setupFocusTraps() {
+        const modalScreens = ['PAUSE', 'LEVEL_COMPLETE', 'GAME_OVER'];
+        
+        modalScreens.forEach(screenName => {
+            const screen = document.getElementById(SCREENS[screenName]);
+            if (!screen) return;
+            
+            screen.addEventListener('keydown', (e) => {
+                if (e.key !== 'Tab') return;
+                
+                const focusableElements = screen.querySelectorAll(
+                    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                );
+                
+                const firstFocusable = focusableElements[0];
+                const lastFocusable = focusableElements[focusableElements.length - 1];
+                
+                if (e.shiftKey && document.activeElement === firstFocusable) {
+                    e.preventDefault();
+                    lastFocusable.focus();
+                } else if (!e.shiftKey && document.activeElement === lastFocusable) {
+                    e.preventDefault();
+                    firstFocusable.focus();
+                }
+            });
+        });
+    }
+
+    /**
+     * Announce to screen readers
+     */
+    function announce(message, assertive = false) {
+        if (typeof window.announceToScreenReader === 'function') {
+            window.announceToScreenReader(message, assertive);
+        } else {
+            // Fallback: create temporary announcer
+            const announcer = document.getElementById('sr-announcer');
+            if (announcer) {
+                announcer.setAttribute('aria-live', assertive ? 'assertive' : 'polite');
+                announcer.textContent = message;
+                setTimeout(() => announcer.textContent = '', 1000);
+            }
+        }
     }
 
     /**
@@ -200,6 +297,10 @@ const UIController = (function() {
         // Help screen
         elements.btnHelpBack = document.getElementById('btn-help-back');
 
+        // Settings screen
+        elements.btnSettings = document.getElementById('btn-settings');
+        elements.btnSettingsBack = document.getElementById('btn-settings-back');
+
         // Loading screen
         elements.loadingText = document.getElementById('loading-text');
 
@@ -233,7 +334,7 @@ const UIController = (function() {
     // ==================== SCREEN MANAGEMENT ====================
 
     /**
-     * Show specific screen with enhanced transitions
+     * Show specific screen with enhanced transitions and focus management
      * @param {string} screenName - Screen name (MENU, ROOM, GAME, etc.)
      * @param {Object} options - Transition options
      */
@@ -247,8 +348,25 @@ const UIController = (function() {
         const { 
             direction = 'up', 
             duration = 500,
-            eager = false 
+            eager = false,
+            announceTransition = true
         } = options;
+
+        // Announce screen change to screen readers
+        if (announceTransition) {
+            const screenLabels = {
+                'MENU': 'Main Menu',
+                'ROOM': 'Room Management',
+                'GAME': 'Game Screen',
+                'PAUSE': 'Game Paused',
+                'LEVEL_COMPLETE': 'Level Complete',
+                'GAME_OVER': 'Game Over',
+                'LOADING': 'Loading',
+                'HELP': 'How to Play',
+                'SETTINGS': 'Settings'
+            };
+            announce(`Now showing ${screenLabels[screenName] || screenName}`, false);
+        }
 
         // Exit animation for current screen
         if (state.currentScreen) {
@@ -277,6 +395,11 @@ const UIController = (function() {
                 
                 state.currentScreen = screenName;
                 console.log(`[UI] Switched to screen: ${screenName}`);
+                
+                // Focus first interactive element after transition
+                setTimeout(() => {
+                    focusFirstInteractive(screenId);
+                }, duration * 0.8);
                 
                 // Trigger haptic feedback on screen change (mobile)
                 triggerHaptic('light');
@@ -535,6 +658,13 @@ const UIController = (function() {
 
         // Level complete screen
         elements.btnNextLevel?.addEventListener('click', handleNextLevel);
+
+        // Help screen
+        elements.btnHelpBack?.addEventListener('click', () => showScreen('MENU'));
+
+        // Settings screen
+        elements.btnSettings?.addEventListener('click', () => showScreen('SETTINGS'));
+        elements.btnSettingsBack?.addEventListener('click', () => showScreen('MENU'));
 
         // Room code input (Enter key)
         elements.roomCodeInput?.addEventListener('keypress', (e) => {
@@ -1761,9 +1891,22 @@ const UIController = (function() {
     function updateGameUI(gameState) {
         if (!gameState) return;
 
+        // Store previous values for change detection
+        const prevScore = elements.scoreDisplay?.textContent;
+        const prevLevel = elements.levelDisplay?.textContent;
+        const prevLives = elements.livesDisplay?.textContent;
+
         // Update score
         if (gameState.score !== undefined && elements.scoreDisplay) {
-            elements.scoreDisplay.textContent = gameState.score.toString().padStart(6, '0');
+            const newScore = gameState.score.toString().padStart(6, '0');
+            elements.scoreDisplay.textContent = newScore;
+            // Announce score changes for accessibility
+            if (prevScore && newScore !== prevScore && gameState.score > 0) {
+                const scoreDiff = gameState.score - parseInt(prevScore);
+                if (scoreDiff >= 100) {
+                    announce(`Score increased by ${scoreDiff} points`, false);
+                }
+            }
         }
 
         // Update level
@@ -1775,7 +1918,35 @@ const UIController = (function() {
         if (gameState.lives !== undefined && elements.livesDisplay) {
             const lives = '♥'.repeat(Math.max(0, gameState.lives));
             elements.livesDisplay.textContent = lives;
+            // Announce lives changes
+            if (prevLives && lives.length < prevLives.length) {
+                announce(`Life lost. ${gameState.lives} lives remaining`, true);
+            }
         }
+        
+        // Update game state description for screen readers
+        updateGameStateDescription(gameState);
+    }
+
+    /**
+     * Update screen reader description of game state
+     */
+    function updateGameStateDescription(gameState) {
+        const descriptionEl = document.getElementById('game-state-description');
+        if (!descriptionEl || !gameState) return;
+        
+        const descriptions = [];
+        if (gameState.score !== undefined) {
+            descriptions.push(`Score: ${gameState.score}`);
+        }
+        if (gameState.lives !== undefined) {
+            descriptions.push(`Lives: ${gameState.lives}`);
+        }
+        if (gameState.level !== undefined) {
+            descriptions.push(`Level: ${gameState.level}`);
+        }
+        
+        descriptionEl.textContent = descriptions.join('. ');
     }
 
     /**
@@ -2087,9 +2258,24 @@ const UIController = (function() {
         isGameActive,
         setGameActive,
         
+        // Accessibility
+        announce,
+        focusFirstInteractive,
+        updateGameStateDescription,
+        
+        // Focus traps
+        setupFocusTraps,
+
+        // Settings
+        loadSettingsToUI: () => {
+            if (typeof loadSettingsToUI === 'function') {
+                loadSettingsToUI();
+            }
+        },
+
         // Network
         getNetwork,
-        
+
         // Constants
         SCREENS
     };
