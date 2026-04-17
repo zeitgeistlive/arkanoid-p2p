@@ -33,6 +33,11 @@ class ArkanoidP2P {
         this.levels = null;
         this.ui = null;
         
+        // Performance monitoring
+        this.perfMonitor = null;
+        this.mobileScaler = null;
+        this.debouncedUIUpdate = null;
+        
         // Application state
         this.state = APP_STATES.LOADING;
         this.previousState = null;
@@ -81,6 +86,17 @@ class ArkanoidP2P {
         console.log('[Main] Initializing...');
         
         try {
+            // Initialize performance monitoring
+            if (typeof PerformanceMonitor !== 'undefined') {
+                this.perfMonitor = new PerformanceMonitor();
+                this.mobileScaler = new MobilePerformanceScaler(this.perfMonitor.getDeviceTier());
+                
+                // Create debounced UI updater
+                this.debouncedUIUpdate = new DebouncedUpdater((gameState) => {
+                    this.ui?.updateGameUI(gameState);
+                }, 32); // Update UI at most at 30fps
+            }
+            
             // Initialize canvas
             this.setupCanvas();
             
@@ -89,6 +105,20 @@ class ArkanoidP2P {
             this.levels = new LevelManager();
             this.game = new Game(this.canvas);
             this.ui = new UIController();
+            
+            // Set up performance monitoring for game module
+            if (typeof setPerformanceMonitors === 'function') {
+                setPerformanceMonitors(this.perfMonitor, this.mobileScaler);
+            }
+            
+            // Set up lazy level loading
+            if (typeof LazyLevelLoader !== 'undefined') {
+                const lazyLoader = new LazyLevelLoader();
+                this.levels.setLazyLoader(lazyLoader);
+                
+                // Preload first few levels during idle time
+                this.levels.preloadUpcomingLevels(3);
+            }
             
             // Setup UI callbacks
             this.setupUICallbacks();
@@ -691,6 +721,11 @@ class ArkanoidP2P {
         
         // Cap delta time to prevent huge jumps
         const dt = Math.min(this.deltaTime, 100);
+        
+        // Update performance monitor
+        if (this.perfMonitor) {
+            this.perfMonitor.update(dt);
+        }
         
         // Update
         this.update(dt);

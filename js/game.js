@@ -104,103 +104,194 @@ class Vec2 {
 }
 
 // ============================================================================
-// PARTICLE SYSTEM
+// PARTICLE SYSTEM WITH OBJECT POOLING
 // ============================================================================
 
+// Initialize performance monitoring
+let performanceMonitor = null;
+let mobileScaler = null;
+
+// Set performance monitors from external module
+function setPerformanceMonitors(monitor, scaler) {
+    performanceMonitor = monitor;
+    mobileScaler = scaler;
+}
+
 class Particle {
-    constructor(x, y, vx, vy, color, life, size) {
-        this.pos = new Vec2(x, y);
-        this.vel = new Vec2(vx, vy);
+    constructor() {
+        this.pos = new Vec2(0, 0);
+        this.vel = new Vec2(0, 0);
+        this.color = '#FFFFFF';
+        this.life = 0;
+        this.maxLife = 0;
+        this.size = 0;
+        this.alpha = 1;
+        this.active = false;
+    }
+
+    init(x, y, vx, vy, color, life, size) {
+        this.pos.x = x;
+        this.pos.y = y;
+        this.vel.x = vx;
+        this.vel.y = vy;
         this.color = color;
-        this.life = life;        // seconds
+        this.life = life;
         this.maxLife = life;
         this.size = size;
+        this.alpha = 1;
+        this.active = true;
+    }
+
+    reset() {
+        this.active = false;
+        this.life = 0;
         this.alpha = 1;
     }
 
     update(dt) {
-        this.pos = this.pos.add(this.vel.mul(dt));
+        if (!this.active) return;
+        
+        this.pos.x += this.vel.x * dt;
+        this.pos.y += this.vel.y * dt;
         this.life -= dt;
-        this.alpha = this.life / this.maxLife;
-        this.vel = this.vel.mul(0.98); // slight drag
+        this.alpha = Math.max(0, this.life / this.maxLife);
+        this.vel.x *= 0.98;
+        this.vel.y *= 0.98;
+        
+        if (this.life <= 0) {
+            this.active = false;
+        }
     }
 
     render(ctx) {
-        ctx.save();
+        if (!this.active) return;
+        
         ctx.globalAlpha = this.alpha;
         ctx.fillStyle = this.color;
         ctx.beginPath();
         ctx.arc(this.pos.x, this.pos.y, this.size, 0, Math.PI * 2);
         ctx.fill();
-        
-        // Glow effect
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = this.color;
-        ctx.fill();
-        ctx.restore();
     }
 
     isDead() {
-        return this.life <= 0;
+        return !this.active || this.life <= 0;
     }
 }
 
 class ParticleSystem {
-    constructor() {
+    constructor(maxParticles = 200) {
         this.particles = [];
+        this.maxParticles = maxParticles;
+        this.poolIndex = 0;
+        
+        // Pre-allocate particles
+        for (let i = 0; i < maxParticles; i++) {
+            this.particles.push(new Particle());
+        }
     }
 
     update(dt) {
-        for (let i = this.particles.length - 1; i >= 0; i--) {
-            this.particles[i].update(dt);
-            if (this.particles[i].isDead()) {
-                this.particles.splice(i, 1);
+        let activeCount = 0;
+        for (const p of this.particles) {
+            if (p.active) {
+                p.update(dt);
+                if (p.active) activeCount++;
             }
         }
     }
 
     render(ctx) {
+        // Batch render for better performance
+        ctx.save();
+        
+        // Skip glow effects on low-end devices
+        const useGlow = !mobileScaler || mobileScaler.shouldRenderEffects();
+        
         for (const p of this.particles) {
-            p.render(ctx);
+            if (p.active) {
+                if (useGlow) {
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = p.color;
+                }
+                p.render(ctx);
+            }
         }
+        
+        ctx.restore();
     }
 
-    // Create explosion effect at position
-    explode(x, y, color, count = 12) {
+    // Find an inactive particle or reuse oldest
+    getParticle() {
+        // Look for inactive particle
+        for (const p of this.particles) {
+            if (!p.active) {
+                return p;
+            }
+        }
+        
+        // All active - reuse the oldest (lowest life)
+        let oldest = this.particles[0];
+        for (const p of this.particles) {
+            if (p.life < oldest.life) {
+                oldest = p;
+            }
+        }
+        return oldest;
+    }
+
+    // Create explosion effect at position - deterministic for P2P sync
+    explode(x, y, color, count = 12, seedOffset = 0) {
+        // Scale particle count based on device tier
+        if (mobileScaler) {
+            count = mobileScaler.getParticleCount(count);
+        }
+        
         const colors = GAME_CONFIG.colors.particles;
         for (let i = 0; i < count; i++) {
-            const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
-            const speed = 50 + Math.random() * 150;
+            // Deterministic angle distribution for P2P synchronization
+            const angle = (Math.PI * 2 * i) / count + (Math.sin(i * 17 + seedOffset) * 0.25);
+            // Deterministic speed using seeded pattern
+            const speed = 50 + ((i * 43 + seedOffset * 13) % 150);
             const vx = Math.cos(angle) * speed;
             const vy = Math.sin(angle) * speed;
-            const particleColor = color || colors[Math.floor(Math.random() * colors.length)];
-            const life = 0.3 + Math.random() * 0.5;
-            const size = 2 + Math.random() * 4;
+            const particleColor = color || colors[i % colors.length];
+            const life = 0.3 + ((i * 7) % 50) / 100;
+            const size = 2 + ((i * 11) % 40) / 10;
             
-            this.particles.push(new Particle(x, y, vx, vy, particleColor, life, size));
+            const p = this.getParticle();
+            p.init(x, y, vx, vy, particleColor, life, size);
         }
     }
 
-    // Spark effect for paddle hits
+    // Spark effect for paddle hits - deterministic for P2P sync
     spark(x, y, normalX, normalY, color) {
-        for (let i = 0; i < 8; i++) {
-            const angle = Math.atan2(normalY, normalX) + (Math.random() - 0.5);
-            const speed = 30 + Math.random() * 80;
+        const baseCount = 8;
+        const count = mobileScaler ? mobileScaler.getParticleCount(baseCount) : baseCount;
+        
+        for (let i = 0; i < count; i++) {
+            // Deterministic angle spread around normal
+            const baseAngle = Math.atan2(normalY, normalX);
+            const angle = baseAngle + (i - count/2 + 0.5) * 0.15;
+            // Deterministic speed
+            const speed = 30 + ((i * 23) % 80);
             const vx = Math.cos(angle) * speed;
             const vy = Math.sin(angle) * speed;
-            const life = 0.2 + Math.random() * 0.3;
-            const size = 2 + Math.random() * 3;
+            const life = 0.2 + ((i * 13) % 30) / 100;
+            const size = 2 + ((i * 7) % 30) / 10;
             
-            this.particles.push(new Particle(x, y, vx, vy, color, life, size));
+            const p = this.getParticle();
+            p.init(x, y, vx, vy, color, life, size);
         }
     }
 
     clear() {
-        this.particles = [];
+        for (const p of this.particles) {
+            p.reset();
+        }
     }
 
     getCount() {
-        return this.particles.length;
+        return this.particles.filter(p => p.active).length;
     }
 }
 
@@ -279,9 +370,11 @@ class PowerUp {
         return new PowerUp(data.x, data.y, data.type);
     }
 
-    static randomType() {
+    static randomType(seed = 0) {
         const types = GAME_CONFIG.powerUps.types;
-        return types[Math.floor(Math.random() * types.length)];
+        // Deterministic selection based on seed for P2P sync
+        const index = seed % types.length;
+        return types[index];
     }
 }
 
@@ -348,15 +441,45 @@ class Ball {
     // Check and resolve wall collisions
     checkWalls(width, height) {
         let hit = false;
+        const MIN_VELOCITY = 10; // Minimum velocity nudge to prevent sticking
 
         // Left/Right walls
         if (this.pos.x - this.radius < 0) {
             this.pos.x = this.radius;
             this.vel.x = Math.abs(this.vel.x);
+            // Add velocity nudge if too slow or stuck
+            if (Math.abs(this.vel.x) < MIN_VELOCITY) {
+                this.vel.x = MIN_VELOCITY;
+            }
+            // Prevent perfectly vertical bounce that could cause sticking
+            if (Math.abs(this.vel.y) < MIN_VELOCITY) {
+                // Deterministic direction based on position
+                this.vel.y = ((this.pos.y * 7) % 2 > 1 ? 1 : -1) * MIN_VELOCITY;
+            }
             hit = true;
         } else if (this.pos.x + this.radius > width) {
             this.pos.x = width - this.radius;
             this.vel.x = -Math.abs(this.vel.x);
+            // Add velocity nudge if too slow or stuck
+            if (Math.abs(this.vel.x) < MIN_VELOCITY) {
+                this.vel.x = -MIN_VELOCITY;
+            }
+            // Prevent perfectly vertical bounce
+            if (Math.abs(this.vel.y) < MIN_VELOCITY) {
+                // Deterministic direction based on position
+                this.vel.y = ((this.pos.y * 11) % 2 > 1 ? 1 : -1) * MIN_VELOCITY;
+            }
+            hit = true;
+        }
+
+        // Top/Bottom walls (blocks top area, prevents escaping through edges)
+        if (this.pos.y - this.radius < 0) {
+            this.pos.y = this.radius;
+            this.vel.y = Math.abs(this.vel.y);
+            hit = true;
+        } else if (this.pos.y + this.radius > height) {
+            this.pos.y = height - this.radius;
+            this.vel.y = -Math.abs(this.vel.y);
             hit = true;
         }
 
@@ -700,8 +823,8 @@ class Block {
 // ============================================================================
 
 class CollisionDetector {
-    // Circle (ball) vs AABB (paddle/block)
-    static circleAABB(circle, rect) {
+    // Circle (ball) vs AABB (paddle/block) - with continuous collision for high speeds
+    static circleAABB(circle, rect, prevPos = null) {
         // Find closest point on rect to circle center
         const closestX = clamp(circle.pos.x, rect.x, rect.x + rect.width);
         const closestY = clamp(circle.pos.y, rect.y, rect.y + rect.height);
@@ -710,7 +833,55 @@ class CollisionDetector {
         const dy = circle.pos.y - closestY;
         const distSq = dx * dx + dy * dy;
         
-        if (distSq < circle.radius * circle.radius) {
+        const rSq = circle.radius * circle.radius;
+        
+        // Continuous collision detection for high speeds
+        // Calculate velocity magnitude
+        const vel = circle.vel || { x: 0, y: 0 };
+        const speedSq = vel.x * vel.x + vel.y * vel.y;
+        const MAX_SPEED_SQ = 400000; // 200^2 - threshold for CCD
+        
+        // If moving fast, check line segment swept volume
+        if (prevPos && speedSq > MAX_SPEED_SQ) {
+            const moveX = circle.pos.x - prevPos.x;
+            const moveY = circle.pos.y - prevPos.y;
+            
+            // Perform swept AABB/circle test
+            // Check if the swept path intersects the rectangle
+            const invEntryX = moveX !== 0 ? (rect.x - prevPos.x) / moveX : 0;
+            const invExitX = moveX !== 0 ? (rect.x + rect.width - prevPos.x) / moveX : 0;
+            const invEntryY = moveY !== 0 ? (rect.y - prevPos.y) / moveY : 0;
+            const invExitY = moveY !== 0 ? (rect.y + rect.height - prevPos.y) / moveY : 0;
+            
+            const entryX = Math.min(invEntryX, invExitX);
+            const entryY = Math.min(invEntryY, invExitY);
+            const entryTime = Math.max(entryX, entryY);
+            
+            // If entry time is in [0,1], collision occurred during movement
+            if (entryTime >= 0 && entryTime <= 1) {
+                // Interpolate collision point
+                const hitX = prevPos.x + moveX * entryTime;
+                const hitY = prevPos.y + moveY * entryTime;
+                
+                // Determine normal based on dominant entry axis
+                let normal;
+                if (entryX > entryY) {
+                    normal = new Vec2(moveX > 0 ? -1 : 1, 0);
+                } else {
+                    normal = new Vec2(0, moveY > 0 ? -1 : 1);
+                }
+                
+                return {
+                    hit: true,
+                    normal: normal,
+                    penetration: circle.radius,
+                    point: new Vec2(hitX, hitY),
+                    continuous: true
+                };
+            }
+        }
+        
+        if (distSq < rSq) {
             // Collision detected
             const dist = Math.sqrt(distSq);
             const normal = dist > 0 
@@ -723,7 +894,8 @@ class CollisionDetector {
                 hit: true,
                 normal: normal,
                 penetration: penetration,
-                point: new Vec2(closestX, closestY)
+                point: new Vec2(closestX, closestY),
+                continuous: false
             };
         }
         
@@ -908,8 +1080,13 @@ class Game {
             ball.stuckTo = paddle;
             ball.stuckOffset = 0;
         } else {
-            // Launch toward center with random angle
-            const angle = paddle.isTop ? Math.PI / 2 + (Math.random() - 0.5) : -Math.PI / 2 + (Math.random() - 0.5);
+            // Launch toward center with deterministic angle for P2P sync
+            // Use ball count as seed for variety
+            const seed = this.balls.length;
+            const angleVariation = ((seed * 37) % 100) / 100 - 0.5; // -0.5 to 0.5
+            const angle = paddle.isTop 
+                ? Math.PI / 2 + angleVariation * 0.5 
+                : -Math.PI / 2 + angleVariation * 0.5;
             ball.launch(angle);
         }
         
@@ -979,6 +1156,10 @@ class Game {
     updateBalls(dt) {
         for (let i = this.balls.length - 1; i >= 0; i--) {
             const ball = this.balls[i];
+            
+            // Store previous position for continuous collision
+            const prevPos = ball.pos.copy();
+            
             ball.update(dt);
             
             // Skip collision for stuck balls
@@ -993,11 +1174,12 @@ class Game {
                 // Wall hit sound/effect could go here
             }
             
-            // Paddle collisions
+            // Paddle collisions - with continuous collision detection
             for (const paddle of this.paddles) {
                 const collision = CollisionDetector.circleAABB(
                     ball,
-                    paddle.getBounds()
+                    paddle.getBounds(),
+                    prevPos
                 );
                 
                 if (collision.hit) {
@@ -1005,18 +1187,55 @@ class Game {
                 }
             }
             
-            // Block collisions
+            // Block collisions - with continuous collision detection
+            let collisionHappened = false;
             for (const block of this.blocks) {
                 if (block.destroyed) continue;
                 
                 const collision = CollisionDetector.circleAABB(
                     ball,
-                    block.getBounds()
+                    block.getBounds(),
+                    prevPos
                 );
                 
                 if (collision.hit) {
                     this.handleBlockHit(ball, block, collision);
+                    collisionHappened = true;
                     break;  // Only one block per frame
+                }
+            }
+            
+            // Sub-step collision for high speeds if no collision detected
+            // This handles the case where ball moves through thin objects
+            if (!collisionHappened) {
+                const speed = ball.vel.length();
+                const subSteps = Math.ceil(speed * dt / GAME_CONFIG.ball.radius);
+                if (subSteps > 1) {
+                    const stepDt = dt / subSteps;
+                    for (let step = 1; step < subSteps; step++) {
+                        const interpPos = prevPos.add(ball.vel.mul(stepDt * step));
+                        const interpBall = { pos: interpPos, vel: ball.vel, radius: ball.radius };
+                        
+                        // Check blocks at interpolated position
+                        for (const block of this.blocks) {
+                            if (block.destroyed) continue;
+                            
+                            const subCollision = CollisionDetector.circleAABB(
+                                interpBall,
+                                block.getBounds()
+                            );
+                            
+                            if (subCollision.hit) {
+                                // Move ball to collision point
+                                ball.pos.x = interpPos.x;
+                                ball.pos.y = interpPos.y;
+                                this.handleBlockHit(ball, block, subCollision);
+                                collisionHappened = true;
+                                break;
+                            }
+                        }
+                        if (collisionHappened) break;
+                    }
                 }
             }
             
@@ -1035,32 +1254,48 @@ class Game {
         // Calculate reflection with angle based on hit position
         const hitPos = paddle.getHitPosition(ball.pos.x);
         
+        // Clamp hit position to avoid extreme angles
+        // This prevents steep angles that make the ball hard to track
+        const CLAMPED_HIT_POS = clamp(hitPos, -0.8, 0.8);
+        
+        // Maximum reflection angle (in radians) - ±50 degrees instead of ±60
+        const MAX_REFLECTION_ANGLE = Math.PI / 3.6; // ~50 degrees
+        
         // Base reflection
         let newAngle;
         if (paddle.isTop) {
             // Top paddle: bounce down
-            newAngle = Math.PI / 2 + hitPos * (Math.PI / 3);  // ±60 degrees
+            newAngle = Math.PI / 2 + CLAMPED_HIT_POS * MAX_REFLECTION_ANGLE;
         } else {
             // Bottom paddle: bounce up
-            newAngle = -Math.PI / 2 - hitPos * (Math.PI / 3);
+            newAngle = -Math.PI / 2 - CLAMPED_HIT_POS * MAX_REFLECTION_ANGLE;
         }
         
-        // Add slight randomness
-        newAngle += (Math.random() - 0.5) * 0.1;
+        // Ensure minimum vertical velocity (prevents horizontal gliding)
+        const MIN_VERTICAL_ANGLE = 0.3; // ~17 degrees from horizontal
+        if (Math.abs(newAngle) < MIN_VERTICAL_ANGLE || 
+            Math.abs(newAngle - Math.PI) < MIN_VERTICAL_ANGLE ||
+            Math.abs(newAngle) > Math.PI - MIN_VERTICAL_ANGLE) {
+            newAngle = newAngle > 0 
+                ? (paddle.isTop ? Math.PI / 2 + 0.3 : -Math.PI / 2 - 0.3)
+                : (paddle.isTop ? Math.PI / 2 - 0.3 : -Math.PI / 2 + 0.3);
+        }
         
-        // Apply velocity
+        // Apply velocity with deterministic adjustment
+        // Use no randomness for P2P sync, or deterministic random based on hit position
         ball.vel = new Vec2(
             Math.cos(newAngle) * ball.speed,
             Math.sin(newAngle) * ball.speed
         );
         
-        // Increase speed
+        // Increase speed (already capped in increaseSpeed)
         ball.increaseSpeed();
         
         // Check sticky power-up
         if (paddle.sticky && !ball.stuck) {
-            // 30% chance to stick
-            if (Math.random() < 0.3) {
+            // 30% chance to stick - deterministic based on combo count for sync
+            const stickChance = (this.combo * 17) % 100 / 100;
+            if (stickChance < 0.3) {
                 ball.stuck = true;
                 ball.stuckTo = paddle;
                 ball.stuckOffset = ball.pos.x - paddle.x;
@@ -1103,15 +1338,18 @@ class Game {
         if (destroyed) {
             this.stats.blocksDestroyed++;
             
-            // Particle explosion
+            // Particle explosion - deterministic seed based on block position
+            const seedOffset = (block.x + block.y) % 1000;
             this.particles.explode(
                 block.x + block.width / 2,
                 block.y + block.height / 2,
-                GAME_CONFIG.colors.blocks[block.maxHp]
+                GAME_CONFIG.colors.blocks[block.maxHp],
+                12,
+                seedOffset
             );
             
-            // Chance to spawn power-up
-            if (Math.random() < GAME_CONFIG.powerUps.chance) {
+            // Chance to spawn power-up - deterministic based on blocks destroyed
+            if ((this.stats.blocksDestroyed * 17) % 100 < GAME_CONFIG.powerUps.chance * 100) {
                 this.spawnPowerUp(block.x + block.width / 2, block.y + block.height / 2);
             }
             
@@ -1168,8 +1406,15 @@ class Game {
     }
 
     spawnPowerUp(x, y) {
-        const type = PowerUp.randomType();
-        this.powerUps.push(new PowerUp(x, y, type));
+        // Clamp spawn position to canvas bounds with padding
+        const PADDING = 20;
+        const clampedX = clamp(x, PADDING, this.width - PADDING);
+        const clampedY = clamp(y, PADDING, this.height / 2); // Power-ups only in top half
+        
+        // Deterministic power-up type based on position and destroyed count
+        const seed = Math.floor(clampedX + clampedY + this.stats.blocksDestroyed);
+        const type = PowerUp.randomType(seed);
+        this.powerUps.push(new PowerUp(clampedX, clampedY, type));
     }
 
     updatePowerUps(dt) {
@@ -1231,10 +1476,14 @@ class Game {
         const sourceBall = this.balls.find(b => b.active);
         if (!sourceBall) return;
         
-        // Create 2 new balls with slight angle variations
-        for (let i = -1; i <= 1; i += 2) {
+        // Create 2 new balls with fixed angle variations (deterministic for P2P sync)
+        // Use source ball position to derive pseudo-random angles
+        const baseAngle = Math.atan2(sourceBall.vel.y, sourceBall.vel.x);
+        const angleOffsets = [-0.3, 0.3]; // Fixed angles instead of random
+        
+        for (const offset of angleOffsets) {
             const ball = new Ball(sourceBall.pos.x, sourceBall.pos.y);
-            const angle = Math.atan2(sourceBall.vel.y, sourceBall.vel.x) + i * 0.3;
+            const angle = baseAngle + offset;
             ball.launch(angle);
             ball.speed = sourceBall.speed;
             this.balls.push(ball);
@@ -1261,13 +1510,16 @@ class Game {
         }
     }
 
-    // Launch stuck ball
+    // Launch stuck ball - deterministic for P2P sync
     launchBall(playerNum) {
         const stuckBall = this.balls.find(b => b.stuck && b.stuckTo && b.stuckTo.playerNum === playerNum);
         if (stuckBall) {
+            // Use ball index + launched count as seed for angle
+            const seed = this.stats.ballsLaunched + stuckBall.pos.x;
+            const angleVariation = ((seed * 23) % 100) / 100 - 0.5; // -0.5 to 0.5
             const angle = stuckBall.stuckTo.isTop 
-                ? Math.PI / 2 + (Math.random() - 0.5) * 0.5
-                : -Math.PI / 2 + (Math.random() - 0.5) * 0.5;
+                ? Math.PI / 2 + angleVariation * 0.5
+                : -Math.PI / 2 + angleVariation * 0.5;
             stuckBall.launch(angle);
             return true;
         }
@@ -1276,12 +1528,22 @@ class Game {
 
     // Rendering
     render() {
-        // Clear canvas
-        this.ctx.fillStyle = '#0a0a0a';
-        this.ctx.fillRect(0, 0, this.width, this.height);
+        // Clear canvas - use dirty rect if enabled
+        if (this.dirtyRectManager && this.dirtyRectManager.hasDirtyRects()) {
+            // Clear only dirty rectangles
+            for (const rect of this.dirtyRectManager.getDirtyRects()) {
+                this.ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+            }
+        } else {
+            // Full clear
+            this.ctx.fillStyle = '#0a0a0a';
+            this.ctx.fillRect(0, 0, this.width, this.height);
+        }
         
-        // Draw grid background (subtle)
-        this.renderBackground();
+        // Draw grid background (subtle) - skip on low-end if many particles
+        if (!this.mobileScaler || this.mobileScaler.shouldRenderEffects() || this.particles.getCount() < 20) {
+            this.renderBackground();
+        }
         
         // Draw blocks
         for (const block of this.blocks) {
@@ -1308,6 +1570,11 @@ class Game {
         
         // Draw UI overlay
         this.renderUI();
+        
+        // Clear dirty rects after render
+        if (this.dirtyRectManager) {
+            this.dirtyRectManager.clear();
+        }
     }
 
     renderBackground() {
@@ -1374,21 +1641,46 @@ class Game {
         this.ctx.restore();
     }
 
-    // Network serialization - Get state for network sync
+// Network serialization - Get state for network sync
     getState() {
+        // Compress state for network transmission
+        const balls = this.balls.map(b => ({
+            x: Math.round(b.pos.x * 10) / 10, // Round to 1 decimal
+            y: Math.round(b.pos.y * 10) / 10,
+            vx: Math.round(b.vel.x * 10) / 10,
+            vy: Math.round(b.vel.y * 10) / 10,
+            a: b.active ? 1 : 0
+        }));
+        
+        const paddles = this.paddles.map(p => ({
+            x: Math.round(p.x * 10) / 10,
+            w: p.width | 0, // Cast to int
+            e: p.expanded ? 1 : 0,
+            s: p.sticky ? 1 : 0
+        }));
+        
         return {
-            timestamp: Date.now(),
-            state: this.state,
-            level: this.level,
-            score: this.score,
-            lives: this.lives,
-            balls: this.balls.map(b => b.toJSON()),
-            paddles: this.paddles.map(p => p.toJSON()),
-            blocks: this.blocks
+            ts: Date.now(), // Short property name
+            st: this.state === 'playing' ? 1 : 0,
+            lv: this.level,
+            sc: this.score,
+            li: this.lives,
+            bl: balls,
+            pd: paddles,
+            blc: this.blocks
                 .filter(b => !b.destroyed)
-                .map(b => b.toJSON()),
-            powerUps: this.powerUps.map(p => p.toJSON()),
-            inputs: this.inputs
+                .map(b => ({
+                    x: Math.round(b.x),
+                    y: Math.round(b.y),
+                    h: b.hp,
+                    t: b.type === 'shield' ? 1 : 0
+                })),
+            pu: this.powerUps.map(p => ({
+                x: Math.round(p.pos.x),
+                y: Math.round(p.pos.y),
+                t: p.type.charAt(0) // First char of type
+            })),
+            in: this.inputs
         };
     }
 
@@ -1396,7 +1688,7 @@ class Game {
     setState(state) {
         // Store for interpolation
         this.stateHistory.push({
-            timestamp: state.timestamp,
+            timestamp: state.ts || state.timestamp,
             state: state
         });
         
@@ -1404,63 +1696,96 @@ class Game {
         const now = Date.now();
         this.stateHistory = this.stateHistory.filter(h => now - h.timestamp < 100);
         
-        // Apply state
-        this.state = state.state;
-        this.level = state.level;
-        this.score = state.score;
-        this.lives = state.lives;
-        this.inputs = state.inputs;
+        // Apply state (handle both compressed and uncompressed)
+        this.state = (state.st === 1 || state.state === 'playing') ? 'playing' : state.state || state.st;
+        this.level = state.lv || state.level;
+        this.score = state.sc || state.score;
+        this.lives = state.li || state.lives;
+        this.inputs = state.in || state.inputs;
         
         // Update balls
-        if (state.balls.length === this.balls.length) {
-            // Update existing balls
-            for (let i = 0; i < state.balls.length; i++) {
-                const newBall = Ball.fromJSON(state.balls[i]);
-                // Interpolate position if close
-                if (distance(this.balls[i].pos.x, this.balls[i].pos.y, newBall.pos.x, newBall.pos.y) < 50) {
-                    this.balls[i].pos.x = lerp(this.balls[i].pos.x, newBall.pos.x, 0.3);
-                    this.balls[i].pos.y = lerp(this.balls[i].pos.y, newBall.pos.y, 0.3);
-                } else {
-                    this.balls[i].pos = newBall.pos;
+        const stateBalls = state.bl || state.balls;
+        if (stateBalls) {
+            if (stateBalls.length === this.balls.length) {
+                // Update existing balls
+                for (let i = 0; i < stateBalls.length; i++) {
+                    const sb = stateBalls[i];
+                    const newBall = {
+                        pos: { x: sb.x, y: sb.y },
+                        vel: { x: sb.vx || 0, y: sb.vy || 0 },
+                        active: sb.a === 1 || sb.active
+                    };
+                    // Interpolate position if close
+                    if (distance(this.balls[i].pos.x, this.balls[i].pos.y, newBall.pos.x, newBall.pos.y) < 50) {
+                        this.balls[i].pos.x = lerp(this.balls[i].pos.x, newBall.pos.x, 0.3);
+                        this.balls[i].pos.y = lerp(this.balls[i].pos.y, newBall.pos.y, 0.3);
+                    } else {
+                        this.balls[i].pos.x = newBall.pos.x;
+                        this.balls[i].pos.y = newBall.pos.y;
+                    }
+                    this.balls[i].vel.x = newBall.vel.x;
+                    this.balls[i].vel.y = newBall.vel.y;
+                    this.balls[i].active = newBall.active;
                 }
-                this.balls[i].vel = newBall.vel;
-                this.balls[i].active = newBall.active;
+            } else {
+                // Recreate balls
+                for (const sb of stateBalls) {
+                    const ball = new Ball(sb.x, sb.y);
+                    ball.vel.x = sb.vx || 0;
+                    ball.vel.y = sb.vy || 0;
+                    ball.active = sb.a === 1 || sb.active;
+                    this.balls.push(ball);
+                }
             }
-        } else {
-            // Recreate balls
-            this.balls = state.balls.map(b => Ball.fromJSON(b));
         }
         
         // Update paddles
-        for (let i = 0; i < state.paddles.length && i < this.paddles.length; i++) {
-            const paddleData = state.paddles[i];
-            // Smooth interpolation for remote paddle
-            this.paddles[i].x = lerp(this.paddles[i].x, paddleData.x, 0.5);
-            this.paddles[i].width = paddleData.width;
-            this.paddles[i].expanded = paddleData.expanded;
-            this.paddles[i].sticky = paddleData.sticky;
+        const statePaddles = state.pd || state.paddles;
+        if (statePaddles) {
+            for (let i = 0; i < statePaddles.length && i < this.paddles.length; i++) {
+                const pd = statePaddles[i];
+                // Smooth interpolation for remote paddle
+                this.paddles[i].x = lerp(this.paddles[i].x, pd.x, 0.5);
+                this.paddles[i].width = pd.w || pd.width;
+                this.paddles[i].expanded = pd.e === 1 || pd.expanded;
+                this.paddles[i].sticky = pd.s === 1 || pd.sticky;
+            }
         }
         
-        // Update blocks (remove destroyed)
-        if (state.blocks.length !== this.blocks.filter(b => !b.destroyed).length) {
-            // Rebuild block array, preserving existing where possible
+        // Update blocks
+        const stateBlocks = state.blc || state.blocks;
+        if (stateBlocks && stateBlocks.length !== this.blocks.filter(b => !b.destroyed).length) {
+            // Rebuild block array
             const newBlocks = [];
-            for (const blockData of state.blocks) {
+            for (const bd of stateBlocks) {
                 const existing = this.blocks.find(b => 
-                    b.x === blockData.x && b.y === blockData.y && !b.destroyed
+                    b.x === (bd.x || 0) && b.y === (bd.y || 0) && !b.destroyed
                 );
                 if (existing) {
-                    existing.hp = blockData.hp;
+                    existing.hp = bd.h || bd.hp;
                     newBlocks.push(existing);
                 } else {
-                    newBlocks.push(Block.fromJSON(blockData));
+                    newBlocks.push(new Block(
+                        bd.x || 0, 
+                        bd.y || 0, 
+                        bd.h || bd.hp || 1, 
+                        bd.t === 1 || bd.type === 'shield' ? 'shield' : 'normal'
+                    ));
                 }
             }
             this.blocks = newBlocks;
         }
         
         // Update power-ups
-        this.powerUps = state.powerUps.map(p => PowerUp.fromJSON(p));
+        const statePowerUps = state.pu || state.powerUps;
+        if (statePowerUps) {
+            this.powerUps = statePowerUps.map(p => {
+                const pu = new PowerUp(p.x, p.y, p.t === 'e' ? 'expand' : 
+                                                 p.t === 'm' ? 'multiball' :
+                                                 p.t === 's' ? 'slow' : 'sticky');
+                return pu;
+            });
+        }
         
         this.lastState = state;
     }
@@ -1525,6 +1850,21 @@ class Game {
 // ============================================================================
 // EXPORTS
 // ============================================================================
+
+// Make classes available globally for non-module usage
+if (typeof window !== 'undefined') {
+    window.Game = Game;
+    window.Ball = Ball;
+    window.Paddle = Paddle;
+    window.Block = Block;
+    window.PowerUp = PowerUp;
+    window.Particle = Particle;
+    window.ParticleSystem = ParticleSystem;
+    window.Vec2 = Vec2;
+    window.CollisionDetector = CollisionDetector;
+    window.GAME_CONFIG = GAME_CONFIG;
+    window.setPerformanceMonitors = setPerformanceMonitors;
+}
 
 export {
     Game,

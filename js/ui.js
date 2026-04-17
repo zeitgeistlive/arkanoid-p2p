@@ -374,24 +374,45 @@ const UIController = (function() {
     function setupTouchControls() {
         if (!elements.gameCanvas) return;
 
-        // Touch move for paddle control
+        // BUG FIX #1: Enhanced touch move for paddle control
+        // Added multi-touch support and better coordinate calculations
         elements.gameCanvas.addEventListener('touchmove', (e) => {
-            e.preventDefault();
+            e.preventDefault(); // Prevent scrolling
+            
+            // Handle multiple touches - use first touch
             const touch = e.touches[0];
+            if (!touch) return;
+            
             const rect = elements.gameCanvas.getBoundingClientRect();
-            const x = (touch.clientX - rect.left) * (elements.gameCanvas.width / rect.width);
+            
+            // Calculate scale factors for responsive canvas
+            const scaleX = elements.gameCanvas.width / rect.width;
+            const scaleY = elements.gameCanvas.height / rect.height;
+            
+            // Calculate position relative to canvas
+            const x = (touch.clientX - rect.left) * scaleX;
+            const y = (touch.clientY - rect.top) * scaleY;
+            
+            state.mousePosition = { x, y };
 
             if (callbacks.onPaddleMove && state.currentScreen === 'GAME' && !state.isPaused) {
                 callbacks.onPaddleMove(x, 'touch');
             }
         }, { passive: false });
 
-        // Touch to launch
+        // BUG FIX #1: Better touch handling with proper event delegation
         elements.gameCanvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent default touch actions
+            
             if (state.currentScreen === 'GAME' && !state.isPaused) {
                 if (callbacks.onLaunchBall) callbacks.onLaunchBall();
             }
-        });
+        }, { passive: false });
+        
+        // BUG FIX #1: Handle touch end to prevent stuck touches
+        elements.gameCanvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+        }, { passive: false });
 
         // Touch buttons
         setupTouchButtons();
@@ -399,32 +420,88 @@ const UIController = (function() {
 
     /**
      * Set up touch control buttons
+     * BUG FIX #1: Improved touch button handling with continuous movement
      */
     function setupTouchButtons() {
         if (!elements.touchLeft || !elements.touchRight) return;
 
-        const handleTouchStart = (direction) => (e) => {
-            e.preventDefault();
-            state.touchActive = true;
+        let touchInterval = null;
+        const TOUCH_REPEAT_DELAY = 50; // ms between repeated movements
+
+        const startContinuousMove = (direction) => {
+            // Initial move
+            movePaddle(direction);
+            
+            // Set up continuous movement while button is held
+            touchInterval = setInterval(() => {
+                movePaddle(direction);
+            }, TOUCH_REPEAT_DELAY);
+        };
+
+        const stopContinuousMove = () => {
+            if (touchInterval) {
+                clearInterval(touchInterval);
+                touchInterval = null;
+            }
+        };
+
+        const movePaddle = (direction) => {
             if (callbacks.onPaddleMove) {
                 const canvasWidth = elements.gameCanvas?.width || 800;
                 const currentX = elements.gameCanvas ? 
                     parseInt(elements.gameCanvas.dataset.paddleX || canvasWidth / 2) : 
                     canvasWidth / 2;
-                const newX = direction === 'left' ? currentX - 50 : currentX + 50;
-                callbacks.onPaddleMove(newX, 'touch');
+                const moveAmount = 30; // Smoother incremental movement
+                const newX = direction === 'left' ? currentX - moveAmount : currentX + moveAmount;
+                
+                // Clamp to canvas bounds
+                const clampedX = Math.max(0, Math.min(newX, canvasWidth));
+                
+                callbacks.onPaddleMove(clampedX, 'touch');
             }
+        };
+
+        const handleTouchStart = (direction) => (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            state.touchActive = true;
+            
+            // Add pressed class for visual feedback
+            const btn = direction === 'left' ? elements.touchLeft : elements.touchRight;
+            if (btn) btn.classList.add('pressed');
+            
+            startContinuousMove(direction);
         };
 
         const handleTouchEnd = (e) => {
             e.preventDefault();
+            e.stopPropagation();
             state.touchActive = false;
+            stopContinuousMove();
+            
+            // Remove pressed class from both buttons
+            if (elements.touchLeft) elements.touchLeft.classList.remove('pressed');
+            if (elements.touchRight) elements.touchRight.classList.remove('pressed');
         };
 
-        elements.touchLeft.addEventListener('touchstart', handleTouchStart('left'));
-        elements.touchLeft.addEventListener('touchend', handleTouchEnd);
-        elements.touchRight.addEventListener('touchstart', handleTouchStart('right'));
-        elements.touchRight.addEventListener('touchend', handleTouchEnd);
+        // BUG FIX #1: Better touch event handling with multiple events
+        // touchstart/touchend for immediate response
+        elements.touchLeft.addEventListener('touchstart', handleTouchStart('left'), { passive: false });
+        elements.touchLeft.addEventListener('touchend', handleTouchEnd, { passive: false });
+        elements.touchLeft.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+        
+        elements.touchRight.addEventListener('touchstart', handleTouchStart('right'), { passive: false });
+        elements.touchRight.addEventListener('touchend', handleTouchEnd, { passive: false });
+        elements.touchRight.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+        
+        // Also support mouse events for testing on desktop
+        elements.touchLeft.addEventListener('mousedown', handleTouchStart('left'));
+        elements.touchLeft.addEventListener('mouseup', handleTouchEnd);
+        elements.touchLeft.addEventListener('mouseleave', handleTouchEnd);
+        
+        elements.touchRight.addEventListener('mousedown', handleTouchStart('right'));
+        elements.touchRight.addEventListener('mouseup', handleTouchEnd);
+        elements.touchRight.addEventListener('mouseleave', handleTouchEnd);
     }
 
     /**
@@ -515,6 +592,8 @@ const UIController = (function() {
 
     /**
      * Copy room code to clipboard
+     * BUG FIX #4: Room code copy not working on some browsers - added fallback
+     * Uses modern Clipboard API when available, falls back to execCommand for older browsers
      */
     async function handleCopyCode() {
         const code = elements.generatedCode?.textContent;
@@ -523,17 +602,61 @@ const UIController = (function() {
             return;
         }
 
-        try {
-            await navigator.clipboard.writeText(code);
-            const btn = elements.btnCopyCode;
-            const originalText = btn.textContent;
+        let copied = false;
+
+        // Try modern Clipboard API first
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(code);
+                copied = true;
+            } catch (err) {
+                console.warn('[UI] Clipboard API failed:', err);
+            }
+        }
+
+        // Fallback: use execCommand for older browsers or non-secure contexts
+        if (!copied) {
+            try {
+                const textarea = document.createElement('textarea');
+                textarea.value = code;
+                textarea.style.position = 'fixed';
+                textarea.style.left = '-9999px';
+                textarea.style.top = '0';
+                textarea.setAttribute('readonly', '');
+                document.body.appendChild(textarea);
+                
+                textarea.select();
+                textarea.setSelectionRange(0, 99999); // For mobile devices
+                
+                copied = document.execCommand('copy');
+                document.body.removeChild(textarea);
+            } catch (err) {
+                console.error('[UI] execCommand fallback failed:', err);
+            }
+        }
+
+        // Provide user feedback
+        const btn = elements.btnCopyCode;
+        const originalText = btn.textContent;
+        
+        if (copied) {
             btn.textContent = 'COPIED!';
             showToast('Code copied to clipboard!', TOAST_TYPES.SUCCESS);
-            setTimeout(() => btn.textContent = originalText, 2000);
-        } catch (err) {
-            console.error('[UI] Failed to copy:', err);
-            showToast('Failed to copy code', TOAST_TYPES.ERROR);
+        } else {
+            // Last resort: select text for manual copy
+            const codeElement = elements.generatedCode;
+            if (codeElement) {
+                const range = document.createRange();
+                range.selectNode(codeElement);
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+            }
+            btn.textContent = 'SELECTED - COPY MANUALLY';
+            showToast('Please copy the code manually', TOAST_TYPES.WARNING);
         }
+        
+        // Reset button text after 2 seconds
+        setTimeout(() => btn.textContent = originalText, 2000);
     }
 
     // ==================== CONNECTION STATUS ====================
@@ -927,7 +1050,8 @@ const UIController = (function() {
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => UIController.init());
 } else {
-    UIController.init();
+    // Defer to ensure all scripts loaded
+    setTimeout(() => UIController.init(), 0);
 }
 
 // Export for module systems

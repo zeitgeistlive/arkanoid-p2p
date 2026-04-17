@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- BUG FIX #6: Added proper viewport meta tag for mobile devices
+       maximum-scale and user-scalable prevent zoom issues on iOS
+       viewport-fit=cover handles notched displays -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <!-- Theme color for mobile browsers -->
+  <meta name="theme-color" content="#0a0a0a">
   <meta name="description" content="GOP-STOP ARKANOID - P2P Cooperative Breakout Game">
   <title>GOP-STOP ARKANOID</title>
   
@@ -300,6 +305,7 @@
        JAVASCRIPT
        ============================================ -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="js/performance.js"></script>
   <script src="js/network.js"></script>
   <script src="js/levels.js"></script>
   <script src="js/game.js"></script>
@@ -373,13 +379,52 @@
         document.getElementById('connection-text').textContent = 'WAITING FOR PLAYER 2...';
       });
       
-      // Copy code
-      document.getElementById('btn-copy-code')?.addEventListener('click', () => {
+      // Copy code - BUG FIX #4: Added fallback for browsers without clipboard API
+      document.getElementById('btn-copy-code')?.addEventListener('click', async () => {
         const code = document.getElementById('generated-code').textContent;
-        navigator.clipboard.writeText(code);
+        let copied = false;
+        
+        // Try modern Clipboard API first
+        if (navigator.clipboard && window.isSecureContext) {
+          try {
+            await navigator.clipboard.writeText(code);
+            copied = true;
+          } catch (err) {
+            console.warn('Clipboard API failed:', err);
+          }
+        }
+        
+        // Fallback: use execCommand for older browsers
+        if (!copied) {
+          try {
+            const textarea = document.createElement('textarea');
+            textarea.value = code;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            textarea.setSelectionRange(0, 99999);
+            copied = document.execCommand('copy');
+            document.body.removeChild(textarea);
+          } catch (err) {
+            console.error('Copy fallback failed:', err);
+          }
+        }
+        
+        // Last resort: select text for manual copy
+        if (!copied) {
+          const codeElement = document.getElementById('generated-code');
+          if (codeElement) {
+            const range = document.createRange();
+            range.selectNode(codeElement);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+          }
+        }
+        
         const btn = document.getElementById('btn-copy-code');
         const originalText = btn.textContent;
-        btn.textContent = 'COPIED!';
+        btn.textContent = copied ? 'COPIED!' : 'SELECTED - COPY MANUALLY';
         setTimeout(() => btn.textContent = originalText, 2000);
       });
     });
