@@ -546,6 +546,7 @@ class ArkanoidP2P {
             this.applySettings();
             
             console.log('[Main] Initialization complete');
+            document.querySelector(".error-boundary").style.display = "none";
         } catch (error) {
             console.error('[Main] Initialization failed:', error);
             this.handleFatalError('Failed to initialize game', error);
