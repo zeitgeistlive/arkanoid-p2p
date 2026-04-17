@@ -2206,12 +2206,38 @@ const UIController = (function() {
         }
     }
 
+    // ==================== EVENT EMITTER ====================
+    // Lightweight pub/sub used by main.js to subscribe to UI events.
+    const _listeners = {};
+    function on(event, fn) {
+        if (typeof fn !== 'function') return;
+        (_listeners[event] || (_listeners[event] = [])).push(fn);
+    }
+    function off(event, fn) {
+        const arr = _listeners[event];
+        if (!arr) return;
+        const i = arr.indexOf(fn);
+        if (i >= 0) arr.splice(i, 1);
+    }
+    function emit(event, ...args) {
+        const arr = _listeners[event];
+        if (!arr) return;
+        for (const fn of arr.slice()) {
+            try { fn(...args); } catch (e) { console.error('[UI] listener error for', event, e); }
+        }
+    }
+
     // ==================== PUBLIC API ====================
 
     return {
         // Core methods
         init,
         showScreen,
+
+        // Events
+        on,
+        off,
+        emit,
         
         // Room management
         setRoomCode,

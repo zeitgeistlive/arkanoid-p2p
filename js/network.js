@@ -452,6 +452,18 @@ class NetworkModule {
 
   isHost() { return this._isHost; }
   getLatency() { return this._latency; }
+
+  getJitter() {
+    if (!this._latencyHistory || this._latencyHistory.length < 2) {
+      return 0;
+    }
+    let sumDiffs = 0;
+    for (let i = 1; i < this._latencyHistory.length; i++) {
+      sumDiffs += Math.abs(this._latencyHistory[i] - this._latencyHistory[i - 1]);
+    }
+    return sumDiffs / (this._latencyHistory.length - 1);
+  }
+
   getConnectionState() { return this._connectionState; }
   getRoomCode() { return this._roomCode; }
 
@@ -883,20 +895,31 @@ class NetworkModule {
 // ==================== SINGLETON EXPORTS ====================
 const network = new NetworkModule();
 
-export const createRoom = () => network.createRoom();
-export const joinRoom = (code) => network.joinRoom(code);
-export const send = (data) => network.send(data);
-export const on = (event, callback) => network.on(event, callback);
-export const off = (event, callback) => network.off(event, callback);
-export const close = () => network.close();
-export const isHost = () => network.isHost();
-export const getLatency = () => network.getLatency();
-export const getJitter = () => network.getJitter();
-export const getConnectionState = () => network.getConnectionState();
-export const getRoomCode = () => network.getRoomCode();
-export const submitRemoteSdp = (sdp) => network.submitRemoteSdp(sdp);
-export const sendInputDelta = (input) => network.sendInputDelta(input);
-export const getNetworkStats = () => network.getNetworkStats();
+// Export functions to window
+window.createRoom = () => network.createRoom();
+window.joinRoom = (code) => network.joinRoom(code);
+window.send = (data) => network.send(data);
+window.on = (event, callback) => network.on(event, callback);
+window.off = (event, callback) => network.off(event, callback);
+window.close = () => network.close();
+window.isHost = () => network.isHost();
+window.getLatency = () => network.getLatency();
+window.getJitter = () => { 
+  if (!network.getJitter) return 0; 
+  return network.getJitter(); 
+};
+window.getConnectionState = () => network.getConnectionState();
+window.getRoomCode = () => network.getRoomCode();
+window.submitRemoteSdp = (sdp) => network.submitRemoteSdp(sdp);
+window.sendInputDelta = (input) => network.sendInputDelta(input);
+window.getNetworkStats = () => network.getNetworkStats();
 
-export { MESSAGE_TYPES, CONNECTION_STATES, ICE_SERVERS, JITTER_BUFFER_CONFIG };
-export default network;
+// Export constants to window
+window.MESSAGE_TYPES = MESSAGE_TYPES;
+window.CONNECTION_STATES = CONNECTION_STATES;
+window.ICE_SERVERS = ICE_SERVERS;
+window.JITTER_BUFFER_CONFIG = JITTER_BUFFER_CONFIG;
+
+// Export the network singleton and NetworkModule class
+window.network = network;
+window.NetworkModule = NetworkModule;

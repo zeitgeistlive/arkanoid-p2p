@@ -703,15 +703,3 @@ if (typeof window !== 'undefined') {
     window.performanceMonitor = performanceMonitor;
 }
 
-export {
-    PerformanceMonitor,
-    ObjectPool,
-    ThrottledStateSync,
-    DirtyRectManager,
-    DebouncedUpdater,
-    MobilePerformanceScaler,
-    LazyLevelLoader,
-    performanceMonitor
-};
-
-export default performanceMonitor;

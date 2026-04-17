@@ -114,13 +114,13 @@ class Vec2 {
 // PARTICLE SYSTEM WITH OBJECT POOLING
 // ============================================================================
 
-// Initialize performance monitoring
-let performanceMonitor = null;
+// Initialize performance monitoring (local refs; performance.js owns the globals)
+let _perfMonitor = null;
 let mobileScaler = null;
 
 // Set performance monitors from external module
 function setPerformanceMonitors(monitor, scaler) {
-    performanceMonitor = monitor;
+    _perfMonitor = monitor;
     mobileScaler = scaler;
 }
 
@@ -2437,20 +2437,16 @@ if (typeof window !== 'undefined') {
     window.setPerformanceMonitors = setPerformanceMonitors;
 }
 
-export {
-    Game,
-    Ball,
-    Paddle,
-    Block,
-    PowerUp,
-    Laser,
-    FloatingText,
-    Particle,
-    ParticleSystem,
-    Vec2,
-    CollisionDetector,
-    GAME_CONFIG
-};
-
-// Also export as default
-export default Game;
+// Assign to window for global access
+window.Game = Game;
+window.Ball = Ball;
+window.Paddle = Paddle;
+window.Block = Block;
+window.PowerUp = PowerUp;
+window.Laser = Laser;
+window.FloatingText = FloatingText;
+window.Particle = Particle;
+window.ParticleSystem = ParticleSystem;
+window.Vec2 = Vec2;
+window.CollisionDetector = CollisionDetector;
+window.GAME_CONFIG = GAME_CONFIG;

@@ -1136,12 +1136,3 @@ if (typeof window !== 'undefined') {
     window.achievementNotification = new AchievementNotification();
 }
 
-export {
-    ProgressionManager,
-    TutorialOverlay,
-    AchievementNotification,
-    ACHIEVEMENTS,
-    RARITY_COLORS
-};
-
-export default ProgressionManager;

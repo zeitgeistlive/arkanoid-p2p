@@ -820,13 +820,10 @@ class LevelManager {
 }
 
 // ============================================================================
-// EXPORTS
+// GLOBAL ASSIGNMENTS
 // ============================================================================
 
-export {
-    LevelManager,
-    LEVELS,
-    PATTERNS
-};
-
-export default LevelManager;
+// Export to window for global access
+window.LevelManager = LevelManager;
+window.LEVELS = LEVELS;
+window.PATTERNS = PATTERNS;

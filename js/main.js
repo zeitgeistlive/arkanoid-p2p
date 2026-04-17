@@ -491,7 +491,7 @@ class ArkanoidP2P {
             this.network = new NetworkModule();
             this.levels = new LevelManager();
             this.game = new Game(this.canvas);
-            this.ui = new UIController();
+            this.ui = UIController;
             
             // Initialize jitter buffer now that network is available
             this.jitterBuffer = new JitterBuffer({
@@ -1475,21 +1475,23 @@ class ArkanoidP2P {
     }
     
     renderUI() {
+        // Screens are DOM-based and managed by UIController.showScreen().
+        // These optional canvas overlay hooks run only if the UI module implements them.
         switch (this.state) {
             case APP_STATES.LOADING:
-                this.ui?.drawLoadingScreen(this.ctx);
+                this.ui?.drawLoadingScreen?.(this.ctx);
                 break;
             case APP_STATES.MENU:
-                this.ui?.drawMenu(this.ctx);
+                this.ui?.drawMenu?.(this.ctx);
                 break;
             case APP_STATES.PAUSED:
-                this.ui?.drawPauseOverlay(this.ctx);
+                this.ui?.drawPauseOverlay?.(this.ctx);
                 break;
             case APP_STATES.GAME_OVER:
-                this.ui?.drawGameOverScreen(this.ctx, this.game?.getScore());
+                this.ui?.drawGameOverScreen?.(this.ctx, this.game?.getScore());
                 break;
             case APP_STATES.VICTORY:
-                this.ui?.drawVictoryScreen(this.ctx, this.game?.getScore());
+                this.ui?.drawVictoryScreen?.(this.ctx, this.game?.getScore());
                 break;
         }
         
@@ -1523,7 +1525,7 @@ class ArkanoidP2P {
         this.state = newState;
         
         // Notify UI
-        this.ui?.onStateChange(newState, this.previousState);
+        this.ui?.onStateChange?.(newState, this.previousState);
         
         // State-specific actions
         switch (newState) {
@@ -1580,12 +1582,20 @@ class ArkanoidP2P {
     }
     
     applySettings(settings) {
-        // Apply game settings
+        // Called with no args at init (pulls from SettingsManager) or with a
+        // settings delta from the UI 'settingsChanged' event.
+        if (!settings && typeof SettingsManager !== 'undefined') {
+            settings = SettingsManager.getAll();
+            if (typeof audioSynth !== 'undefined' && audioSynth.setVolume && settings.audioVolume !== undefined) {
+                audioSynth.setVolume(settings.audioVolume);
+            }
+        }
+        if (!settings) return;
         if (settings.sound !== undefined) {
-            this.game?.setSoundEnabled(settings.sound);
+            this.game?.setSoundEnabled?.(settings.sound);
         }
         if (settings.particles !== undefined) {
-            this.game?.setParticlesEnabled(settings.particles);
+            this.game?.setParticlesEnabled?.(settings.particles);
         }
     }
     
