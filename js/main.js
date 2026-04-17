@@ -491,7 +491,7 @@ class ArkanoidP2P {
             this.network = network;
             this.levels = new LevelManager();
             this.game = new Game(this.canvas);
-            this.ui = UIController.init();
+            this.ui = UIController;
             
             // Initialize jitter buffer now that network is available
             this.jitterBuffer = new JitterBuffer({
@@ -604,7 +604,11 @@ class ArkanoidP2P {
     // ============================================================================
     
     setupUICallbacks() {
-        if (!this.ui || typeof this.ui.setCallbacks !== 'function') return;
+        console.log('[Main] Setting up UI callbacks. UI API type:', typeof this.ui, 'has setCallbacks:', (this.ui && typeof this.ui.setCallbacks === 'function'));
+        if (!this.ui || typeof this.ui.setCallbacks !== 'function') {
+            console.error('[Main] ERROR: Cannot setup UI callbacks! this.ui is missing setCallbacks.');
+            return;
+        }
 
         this.ui.setCallbacks({
             onRoomCreate: () => this.createRoom(),
@@ -904,7 +908,7 @@ class ArkanoidP2P {
             const roomCode = await this.network.createRoom();
             this.roomCode = roomCode;
             
-            this.ui?.showRoomCode(roomCode);
+            this.ui?.setRoomCode(roomCode);
             this.transitionTo(APP_STATES.WAITING);
             
             console.log('[Main] Room created:', roomCode);
@@ -1015,12 +1019,15 @@ class ArkanoidP2P {
         this.isHost = data.isHost;
         this.playerNum = this.isHost ? 1 : 2;
         
+        this.ui?.setConnectionStatus(this.ui.CONNECTION_STATUS.CONNECTED, this.playerNum);
+        
         if (this.isHost) {
-            // Host waits for game to start
-            this.ui?.showStartButton();
+            // Host starts the game automatically after short delay (or UI triggers it)
+            this.ui?.showToast('Player connected! Starting game...', 'success');
+            setTimeout(() => this.startGame(), 2000);
         } else {
             // Guest waits for host to start
-            this.ui?.showWaitingMessage('Waiting for host to start...');
+            this.ui?.setLoadingText('WAITING FOR HOST TO START...');
         }
     }
     
@@ -1029,7 +1036,7 @@ class ArkanoidP2P {
             ? 'Opponent disconnected' 
             : 'Connection failed';
         
-        this.ui?.showError(errorMsg);
+        this.ui?.showToast(errorMsg, 'error');
         this.transitionTo(APP_STATES.MENU);
     }
     
@@ -1038,7 +1045,7 @@ class ArkanoidP2P {
             case MESSAGE_TYPES.INIT:
                 // Initial handshake complete
                 if (!this.isHost) {
-                    this.ui?.showWaitingMessage('Connected! Waiting for host...');
+                    this.ui?.setLoadingText('CONNECTED! WAITING FOR HOST...');
                     this.sendAck();
                 }
                 break;

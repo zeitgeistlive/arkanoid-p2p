@@ -2206,7 +2206,12 @@ const UIController = (function() {
         }
     }
 
-    // ==================== EVENT EMITTER ====================
+    // ==================== EMITTER API & CALLBACKS ====================
+    function setCallbacks(options) {
+        if (options && typeof options === 'object') {
+            Object.assign(callbacks, options);
+        }
+    }
     // Lightweight pub/sub used by main.js to subscribe to UI events.
     const _listeners = {};
     function on(event, fn) {
@@ -2232,6 +2237,7 @@ const UIController = (function() {
     return {
         // Core methods
         init,
+        setCallbacks,
         showScreen,
 
         // Events
