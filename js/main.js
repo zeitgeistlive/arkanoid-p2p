@@ -951,7 +951,7 @@ class ArkanoidP2P {
         
         // Load first level (levels are 1-indexed)
         const levelData = this.levels.getLevel(1);
-        this.game.loadLevel(levelData);
+        this.game.init(levelData);
         
         // Start tracking first level for progression
         this.startLevel(1);
@@ -972,7 +972,7 @@ class ArkanoidP2P {
         this.desyncDetector = new DesyncDetector(0.05);
         
         // Set player roles in game engine
-        this.game.setPlayerRole(this.isHost, this.playerNum);
+        this.game.setHost(this.isHost);
         
         this.transitionTo(APP_STATES.PLAYING);
         this.lastFrameTime = performance.now();
@@ -1259,7 +1259,7 @@ class ArkanoidP2P {
     sendGameState() {
         if (!this.isHost || !this.game) return;
         
-        const state = this.game.getFullState();
+        const state = this.game.getState();
         const timestamp = Date.now();
         
         this.network?.send({
@@ -1283,7 +1283,7 @@ class ArkanoidP2P {
     
     calculateGameStateChecksum() {
         // Simple checksum for desync detection
-        const state = this.game?.getFullState();
+        const state = this.game?.getState();
         if (!state) return 0;
         
         let checksum = 0;
@@ -1368,15 +1368,13 @@ class ArkanoidP2P {
             
             // Set both paddle positions
             if (this.isHost) {
-                this.game.setPaddlePosition(1, this.localInput.x);
-                this.game.setPaddlePosition(2, this.remoteInput.x);
-                this.game.setInput(2, this.remoteInput.fire);
+                this.game.setInput(1, this.localInput.x);
+                this.game.setInput(2, this.remoteInput.x);
             } else {
                 // Guest: Use predicted input locally
                 const predictedInput = this.inputPredictor.predict(dt);
-                this.game.setPaddlePosition(1, this.remoteInput.x);
-                this.game.setPaddlePosition(2, predictedInput.x);
-                this.game.setInput(2, this.localInput.fire);
+                this.game.setInput(1, this.remoteInput.x);
+                this.game.setInput(2, predictedInput.x);
             }
             
             // Get smoothed state from jitter buffer for guest
@@ -1401,7 +1399,7 @@ class ArkanoidP2P {
             
             // Check for desyncs
             if (!this.isHost && this.targetState) {
-                const currentGameState = this.game.getFullState();
+                const currentGameState = this.game.getState();
                 const desyncResult = this.desyncDetector.checkForDesync(
                     currentGameState,
                     this.targetState,
@@ -1424,7 +1422,7 @@ class ArkanoidP2P {
             // Record state for lag compensation
             if (!this.isHost) {
                 this.lagCompensator.recordLocalState(
-                    this.game.getFullState(),
+                    this.game.getState(),
                     Date.now()
                 );
             }
