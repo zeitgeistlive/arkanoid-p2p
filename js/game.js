@@ -43,9 +43,16 @@ const GAME_CONFIG = {
         particles: ['#FF0055', '#FFAA00', '#00FF88', '#0088FF', '#AA00FF']
     },
     powerUps: {
-        chance: 0.15,          // 15% chance on block destroy
-        types: ['expand', 'multiball', 'slow', 'sticky'],
+        chance: 0.25,          // 25% chance on block destroy
+        types: ['expand', 'multiball', 'slow', 'sticky', 'laser', 'magnet', 'shield'],
         fallSpeed: 150
+    },
+    laser: {
+        width: 4,
+        height: 16,
+        speed: 600,
+        color: '#FF0000',
+        maxShots: 5
     }
 };
 
@@ -307,35 +314,114 @@ class PowerUp {
         this.vel = new Vec2(0, GAME_CONFIG.powerUps.fallSpeed);
         this.collected = false;
         
-        // Power-up properties
+        // Power-up properties with enhanced visuals and labels
         this.types = {
-            expand: { color: '#00FF88', symbol: '↔', duration: 10 },
-            multiball: { color: '#FFAA00', symbol: '●', duration: 0 },
-            slow: { color: '#0088FF', symbol: '⏱', duration: 8 },
-            sticky: { color: '#AA00FF', symbol: '§', duration: 10 }
+            expand: { 
+                color: '#00FF88', 
+                symbol: '↔', 
+                duration: 10,
+                label: 'EXPAND',
+                glowColor: '#00FF88',
+                glowSize: 20
+            },
+            multiball: { 
+                color: '#FFAA00', 
+                symbol: '●', 
+                duration: 0,
+                label: 'MULTIBALL',
+                glowColor: '#FFAA00',
+                glowSize: 20
+            },
+            slow: { 
+                color: '#0088FF', 
+                symbol: '⏱', 
+                duration: 8,
+                label: 'SLOW',
+                glowColor: '#0088FF',
+                glowSize: 20
+            },
+            sticky: { 
+                color: '#AA00FF', 
+                symbol: '§', 
+                duration: 10,
+                label: 'STICKY',
+                glowColor: '#AA00FF',
+                glowSize: 20
+            },
+            laser: { 
+                color: '#FF0000', 
+                symbol: '⌄', 
+                duration: 15,
+                label: 'LASER',
+                glowColor: '#FF0000',
+                glowSize: 25
+            },
+            magnet: { 
+                color: '#FF00AA', 
+                symbol: '⧖', 
+                duration: 12,
+                label: 'MAGNET',
+                glowColor: '#FF00AA',
+                glowSize: 25
+            },
+            shield: { 
+                color: '#00FFFF', 
+                symbol: '◊', 
+                duration: 0,
+                label: 'SHIELD',
+                glowColor: '#00FFFF',
+                glowSize: 25
+            }
         };
+        
+        // Animation properties
+        this.animTime = 0;
+        this.pulse = 0;
     }
 
     update(dt) {
         this.pos = this.pos.add(this.vel.mul(dt));
+        this.animTime += dt;
+        this.pulse = 0.7 + Math.sin(this.animTime * 5) * 0.3; // Pulsing effect
     }
 
     render(ctx) {
         const props = this.types[this.type] || this.types.expand;
         
         ctx.save();
+        
+        // Outer glow pulse
+        const glowSize = props.glowSize * this.pulse;
+        ctx.shadowBlur = glowSize;
+        ctx.shadowColor = props.glowColor;
+        
+        // Outer glow ring
         ctx.fillStyle = props.color;
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.3 * this.pulse;
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, this.radius + 4, 0, Math.PI * 2);
+        ctx.fill();
         
-        // Glow
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = props.color;
-        
-        // Circle background
+        // Main circle
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = props.color;
         ctx.beginPath();
         ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
+        
+        // Inner highlight
+        ctx.fillStyle = '#FFFFFF';
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        ctx.arc(this.pos.x - 3, this.pos.y - 3, this.radius * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Border
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
         ctx.stroke();
         
         // Symbol
@@ -343,8 +429,30 @@ class PowerUp {
         ctx.font = 'bold 14px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowBlur = 5;
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = props.color;
         ctx.fillText(props.symbol, this.pos.x, this.pos.y);
+        
+        // Floating label above power-up
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = props.color;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = props.color;
+        
+        // Label background for readability
+        const labelText = props.label;
+        const textWidth = ctx.measureText(labelText).width;
+        const labelY = this.pos.y - this.radius - 12;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.beginPath();
+        ctx.roundRect(this.pos.x - textWidth/2 - 4, labelY - 8, textWidth + 8, 14, 3);
+        ctx.fill();
+        
+        // Label text
+        ctx.fillStyle = props.color;
+        ctx.fillText(labelText, this.pos.x, labelY);
         
         ctx.restore();
     }
@@ -375,6 +483,129 @@ class PowerUp {
         // Deterministic selection based on seed for P2P sync
         const index = seed % types.length;
         return types[index];
+    }
+    
+    // Get serialization char for network
+    getTypeChar() {
+        const charMap = {
+            'expand': 'e',
+            'multiball': 'm',
+            'slow': 's',
+            'sticky': 't',
+            'laser': 'l',
+            'magnet': 'n',
+            'shield': 'h'
+        };
+        return charMap[this.type] || 'e';
+    }
+}
+
+// ============================================================================
+// LASER PROJECTILE
+// ============================================================================
+
+class Laser {
+    constructor(x, y, direction = 1) {
+        this.pos = new Vec2(x, y);
+        this.vel = new Vec2(0, GAME_CONFIG.laser.speed * direction);
+        this.width = GAME_CONFIG.laser.width;
+        this.height = GAME_CONFIG.laser.height;
+        this.active = true;
+        this.color = GAME_CONFIG.laser.color;
+        this.fromPlayer = direction === -1 ? 1 : 2; // Bottom player shoots up (direction -1), top shoots down
+    }
+
+    update(dt) {
+        this.pos = this.pos.add(this.vel.mul(dt));
+        
+        // Deactivate if off screen
+        if (this.pos.y < -50 || this.pos.y > GAME_CONFIG.canvas.height + 50) {
+            this.active = false;
+        }
+    }
+
+    render(ctx) {
+        ctx.save();
+        
+        // Glow effect
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = this.color;
+        
+        // Main laser beam
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.pos.x - this.width/2, this.pos.y - this.height/2, this.width, this.height);
+        
+        // Inner bright core
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(this.pos.x - this.width/4, this.pos.y - this.height/2, this.width/2, this.height);
+        
+        ctx.restore();
+    }
+
+    getBounds() {
+        return {
+            x: this.pos.x - this.width/2,
+            y: this.pos.y - this.height/2,
+            width: this.width,
+            height: this.height
+        };
+    }
+}
+
+// ============================================================================
+// FLOATING TEXT LABEL
+// ============================================================================
+
+class FloatingText {
+    constructor(x, y, text, color, duration = 1.5) {
+        this.x = x;
+        this.y = y;
+        this.text = text;
+        this.color = color;
+        this.duration = duration;
+        this.life = duration;
+        this.active = true;
+        this.vy = -30; // Float upward
+        this.scale = 1;
+    }
+
+    update(dt) {
+        this.life -= dt;
+        this.y += this.vy * dt;
+        
+        // Scale up then down
+        const progress = 1 - (this.life / this.duration);
+        if (progress < 0.2) {
+            this.scale = 1 + progress * 2; // Scale up to 1.4
+        } else {
+            this.scale = 1.4 - (progress - 0.2) * 0.5; // Scale down slightly
+        }
+        
+        if (this.life <= 0) {
+            this.active = false;
+        }
+    }
+
+    render(ctx) {
+        if (!this.active) return;
+        
+        ctx.save();
+        
+        const alpha = Math.min(1, this.life / 0.5);
+        ctx.globalAlpha = alpha;
+        
+        // Shadow/glow
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+        
+        // Draw text
+        ctx.fillStyle = this.color;
+        ctx.font = `bold ${Math.floor(16 * this.scale)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.text, this.x, this.y);
+        
+        ctx.restore();
     }
 }
 
@@ -599,8 +830,20 @@ class Paddle {
         this.sticky = false;
         this.stickyTimer = 0;
         
+        // New power-up effects
+        this.laser = false;
+        this.laserTimer = 0;
+        this.laserShots = 0;
+        this.laserCooldown = 0;
+        this.magnet = false;
+        this.magnetTimer = 0;
+        this.magnetRange = 150; // Pull range in pixels
+        this.magnetStrength = 200; // Pull strength
+        this.shield = false;
+        
         // Visual
         this.glowIntensity = 0;
+        this.laserFlash = 0;
     }
 
     update(dt) {
@@ -619,9 +862,33 @@ class Paddle {
                 this.sticky = false;
             }
         }
+        
+        if (this.laserTimer > 0) {
+            this.laserTimer -= dt;
+            if (this.laserTimer <= 0) {
+                this.laser = false;
+                this.laserShots = 0;
+            }
+        }
+        
+        if (this.laserCooldown > 0) {
+            this.laserCooldown -= dt;
+        }
+        
+        if (this.magnetTimer > 0) {
+            this.magnetTimer -= dt;
+            if (this.magnetTimer <= 0) {
+                this.magnet = false;
+            }
+        }
 
         // Update glow
         this.glowIntensity = 0.5 + Math.sin(Date.now() / 200) * 0.3;
+        
+        // Update laser flash
+        if (this.laserFlash > 0) {
+            this.laserFlash -= dt;
+        }
     }
 
     setPosition(x, canvasWidth) {
@@ -639,6 +906,62 @@ class Paddle {
     enableSticky(duration) {
         this.sticky = true;
         this.stickyTimer = duration;
+    }
+    
+    enableLaser(duration) {
+        this.laser = true;
+        this.laserTimer = duration;
+        this.laserShots = GAME_CONFIG.laser.maxShots;
+    }
+    
+    enableMagnet(duration) {
+        this.magnet = true;
+        this.magnetTimer = duration;
+    }
+    
+    enableShield() {
+        this.shield = true;
+    }
+    
+    useShield() {
+        if (this.shield) {
+            this.shield = false;
+            return true;
+        }
+        return false;
+    }
+    
+    shoot() {
+        if (!this.laser || this.laserShots <= 0 || this.laserCooldown > 0) {
+            return null;
+        }
+        
+        this.laserShots--;
+        this.laserCooldown = 0.3; // 300ms cooldown between shots
+        this.laserFlash = 0.1;
+        
+        const direction = this.isTop ? 1 : -1; // Top shoots down, bottom shoots up
+        const laserY = this.isTop ? this.y + this.height/2 : this.y - this.height/2;
+        
+        return new Laser(this.x, laserY, direction);
+    }
+    
+    getMagnetForce(ballX, ballY) {
+        if (!this.magnet) return null;
+        
+        const dy = this.y - ballY;
+        const dx = this.x - ballX;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist > this.magnetRange) return null;
+        
+        // Calculate pull force
+        const force = this.magnetStrength * (1 - dist / this.magnetRange);
+        return {
+            fx: (dx / dist) * force,
+            fy: (dy / dist) * force,
+            strength: force
+        };
     }
 
     getBounds() {
@@ -664,6 +987,13 @@ class Paddle {
         ctx.shadowBlur = 15 * this.glowIntensity;
         ctx.shadowColor = this.color;
         
+        // Laser flash effect
+        if (this.laserFlash > 0) {
+            ctx.shadowBlur = 40;
+            ctx.shadowColor = '#FF0000';
+            ctx.fillStyle = '#FF4444';
+        }
+        
         // Rounded rectangle
         const radius = 4;
         ctx.beginPath();
@@ -681,14 +1011,71 @@ class Paddle {
         ctx.globalAlpha = 0.3;
         ctx.fillRect(this.x - 2, bounds.y, 4, bounds.height);
         
+        // Power-up indicators
+        const time = Date.now() / 200;
+        
         // Sticky indicator
         if (this.sticky) {
             ctx.strokeStyle = '#AA00FF';
             ctx.lineWidth = 3;
-            ctx.globalAlpha = 0.8 + Math.sin(Date.now() / 100) * 0.2;
+            ctx.globalAlpha = 0.8 + Math.sin(time) * 0.2;
             ctx.beginPath();
             ctx.roundRect(bounds.x - 2, bounds.y - 2, bounds.width + 4, bounds.height + 4, radius + 2);
             ctx.stroke();
+        }
+        
+        // Laser indicator
+        if (this.laser) {
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 3;
+            ctx.globalAlpha = 0.8 + Math.sin(time * 2) * 0.2;
+            ctx.beginPath();
+            ctx.roundRect(bounds.x - 3, bounds.y - 3, bounds.width + 6, bounds.height + 6, radius + 3);
+            ctx.stroke();
+            
+            // Laser shots counter
+            ctx.fillStyle = '#FF0000';
+            ctx.globalAlpha = 1;
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`⚡${this.laserShots}`, this.x, bounds.y - 8);
+        }
+        
+        // Magnet indicator
+        if (this.magnet) {
+            ctx.strokeStyle = '#FF00AA';
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.6 + Math.sin(time * 1.5) * 0.3;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.roundRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8, radius + 4);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Magnet range visualization (subtle)
+            ctx.strokeStyle = '#FF00AA';
+            ctx.globalAlpha = 0.1;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.magnetRange, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
+        // Shield indicator
+        if (this.shield) {
+            ctx.strokeStyle = '#00FFFF';
+            ctx.lineWidth = 4;
+            ctx.globalAlpha = 0.8 + Math.sin(time * 3) * 0.2;
+            ctx.beginPath();
+            ctx.roundRect(bounds.x - 5, bounds.y - 5, bounds.width + 10, bounds.height + 10, radius + 5);
+            ctx.stroke();
+            
+            // Shield icon
+            ctx.fillStyle = '#00FFFF';
+            ctx.globalAlpha = 1;
+            ctx.font = 'bold 12px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('◊', this.x, bounds.y - 10);
         }
         
         ctx.restore();
@@ -700,7 +1087,11 @@ class Paddle {
             y: this.y,
             width: this.width,
             expanded: this.expanded,
-            sticky: this.sticky
+            sticky: this.sticky,
+            laser: this.laser,
+            magnet: this.magnet,
+            shield: this.shield,
+            laserShots: this.laserShots
         };
     }
 
@@ -709,6 +1100,10 @@ class Paddle {
         paddle.width = data.width;
         paddle.expanded = data.expanded;
         paddle.sticky = data.sticky;
+        paddle.laser = data.laser || false;
+        paddle.magnet = data.magnet || false;
+        paddle.shield = data.shield || false;
+        paddle.laserShots = data.laserShots || 0;
         return paddle;
     }
 }
@@ -938,6 +1333,8 @@ class Game {
         this.paddles = [];
         this.blocks = [];
         this.powerUps = [];
+        this.lasers = []; // Active laser projectiles
+        this.floatingTexts = []; // Floating text labels
         this.particles = new ParticleSystem();
         
         // Scoring
@@ -982,7 +1379,9 @@ class Game {
         this.stats = {
             blocksDestroyed: 0,
             ballsLaunched: 0,
-            powerUpsCollected: 0
+            powerUpsCollected: 0,
+            lasersFired: 0,
+            shieldsUsed: 0
         };
     }
 
@@ -1139,8 +1538,14 @@ class Game {
         // Update power-ups
         this.updatePowerUps(dt);
         
+        // Update lasers
+        this.updateLasers(dt);
+        
+        // Update floating texts
+        this.updateFloatingTexts(dt);
+        
         // Update balls
-        this.updateBalls(dt);
+        this.updateBalls(dt, true);
         
         // Update blocks
         for (const block of this.blocks) {
@@ -1153,12 +1558,28 @@ class Game {
         }
     }
 
-    updateBalls(dt) {
+    updateBalls(dt, applyMagnet = false) {
         for (let i = this.balls.length - 1; i >= 0; i--) {
             const ball = this.balls[i];
             
             // Store previous position for continuous collision
             const prevPos = ball.pos.copy();
+            
+            // Apply magnet effect before movement
+            if (applyMagnet && ball.active && !ball.stuck) {
+                for (const paddle of this.paddles) {
+                    if (paddle.magnet) {
+                        const force = paddle.getMagnetForce(ball.pos.x, ball.pos.y);
+                        if (force) {
+                            // Apply magnetic force to velocity
+                            ball.vel.x += force.fx * dt;
+                            ball.vel.y += force.fy * dt;
+                            // Update speed
+                            ball.speed = ball.vel.length();
+                        }
+                    }
+                }
+            }
             
             ball.update(dt);
             
@@ -1378,6 +1799,39 @@ class Game {
     }
 
     handleBallMiss(ball, side, index) {
+        // Find the paddle that was supposed to catch this ball
+        const paddleIndex = side === 'bottom' ? 0 : 1;
+        const paddle = this.paddles[paddleIndex];
+        
+        // Check if paddle has shield
+        if (paddle && paddle.shield) {
+            paddle.useShield();
+            this.stats.shieldsUsed++;
+            
+            // Bounce ball back instead of losing it
+            ball.vel.y = -ball.vel.y;
+            ball.pos.y = side === 'bottom' ? this.height - ball.radius - 10 : ball.radius + 10;
+            
+            // Create shield burst effect
+            this.particles.explode(
+                ball.pos.x,
+                ball.pos.y,
+                '#00FFFF',
+                20,
+                (ball.pos.x + ball.pos.y) % 1000
+            );
+            
+            // Add floating text
+            this.addFloatingText(paddle.x, paddle.y, 'SHIELD!', '#00FFFF');
+            
+            // Audio
+            if (typeof audioSynth !== 'undefined') {
+                audioSynth.powerUp();
+            }
+            
+            return; // Don't remove the ball
+        }
+        
         // Remove ball
         this.balls.splice(index, 1);
         
@@ -1445,20 +1899,37 @@ class Game {
 
     collectPowerUp(powerUp, paddle) {
         this.stats.powerUpsCollected++;
+        const props = PowerUp.prototype.types[powerUp.type];
         
         switch (powerUp.type) {
             case 'expand':
-                paddle.expand(PowerUp.prototype.types.expand.duration);
+                paddle.expand(props.duration);
+                this.addFloatingText(paddle.x, paddle.y - 30, 'EXPAND!', props.color);
                 break;
             case 'multiball':
                 this.spawnMultiball();
+                this.addFloatingText(paddle.x, paddle.y - 30, 'MULTIBALL!', props.color);
                 break;
             case 'slow':
-                this.activeEffects.slow = PowerUp.prototype.types.slow.duration;
+                this.activeEffects.slow = props.duration;
                 this.applySlowEffect();
+                this.addFloatingText(paddle.x, paddle.y - 30, 'SLOW!', props.color);
                 break;
             case 'sticky':
-                paddle.enableSticky(PowerUp.prototype.types.sticky.duration);
+                paddle.enableSticky(props.duration);
+                this.addFloatingText(paddle.x, paddle.y - 30, 'STICKY!', props.color);
+                break;
+            case 'laser':
+                paddle.enableLaser(props.duration);
+                this.addFloatingText(paddle.x, paddle.y - 30, 'LASER ON!', props.color);
+                break;
+            case 'magnet':
+                paddle.enableMagnet(props.duration);
+                this.addFloatingText(paddle.x, paddle.y - 30, 'MAGNET!', props.color);
+                break;
+            case 'shield':
+                paddle.enableShield();
+                this.addFloatingText(paddle.x, paddle.y - 30, 'SHIELD READY!', props.color);
                 break;
         }
         
@@ -1471,9 +1942,13 @@ class Game {
         this.particles.explode(
             powerUp.pos.x,
             powerUp.pos.y,
-            PowerUp.prototype.types[powerUp.type].color,
+            props.color,
             20
         );
+    }
+    
+    addFloatingText(x, y, text, color) {
+        this.floatingTexts.push(new FloatingText(x, y, text, color));
     }
 
     spawnMultiball() {
@@ -1513,6 +1988,67 @@ class Game {
                 }
             }
         }
+    }
+    
+    updateLasers(dt) {
+        for (let i = this.lasers.length - 1; i >= 0; i--) {
+            const laser = this.lasers[i];
+            laser.update(dt);
+            
+            // Check block collisions
+            let hit = false;
+            for (const block of this.blocks) {
+                if (block.destroyed) continue;
+                
+                if (CollisionDetector.AABB(laser.getBounds(), block.getBounds())) {
+                    // Instant destroy for laser
+                    block.hp = 0;
+                    block.destroyed = true;
+                    
+                    // Explosion effect
+                    this.particles.explode(
+                        block.x + block.width / 2,
+                        block.y + block.height / 2,
+                        GAME_CONFIG.colors.blocks[block.maxHp],
+                        12,
+                        (block.x + block.y) % 1000
+                    );
+                    
+                    // Score
+                    const playerNum = laser.fromPlayer;
+                    this.score[playerNum] += 50;
+                    
+                    hit = true;
+                    break; // Laser destroyed, can only hit one block
+                }
+            }
+            
+            if (!laser.active || hit) {
+                this.lasers.splice(i, 1);
+            }
+        }
+    }
+    
+    updateFloatingTexts(dt) {
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            this.floatingTexts[i].update(dt);
+            if (!this.floatingTexts[i].active) {
+                this.floatingTexts.splice(i, 1);
+            }
+        }
+    }
+    
+    // Shoot laser for a player
+    shootLaser(playerNum) {
+        const paddle = this.paddles[playerNum - 1];
+        if (!paddle.laser) return null;
+        
+        const laser = paddle.shoot();
+        if (laser) {
+            this.lasers.push(laser);
+            this.stats.lasersFired++;
+        }
+        return laser;
     }
 
     // Launch stuck ball - deterministic for P2P sync
@@ -1568,6 +2104,16 @@ class Game {
         // Draw power-ups
         for (const pu of this.powerUps) {
             pu.render(this.ctx);
+        }
+        
+        // Draw lasers
+        for (const laser of this.lasers) {
+            laser.render(this.ctx);
+        }
+        
+        // Draw floating texts
+        for (const text of this.floatingTexts) {
+            text.render(this.ctx);
         }
         
         // Draw particles
@@ -1661,7 +2207,11 @@ class Game {
             x: Math.round(p.x * 10) / 10,
             w: p.width | 0, // Cast to int
             e: p.expanded ? 1 : 0,
-            s: p.sticky ? 1 : 0
+            s: p.sticky ? 1 : 0,
+            l: p.laser ? 1 : 0,
+            m: p.magnet ? 1 : 0,
+            h: p.shield ? 1 : 0,
+            ls: p.laserShots | 0
         }));
         
         return {
@@ -1683,7 +2233,7 @@ class Game {
             pu: this.powerUps.map(p => ({
                 x: Math.round(p.pos.x),
                 y: Math.round(p.pos.y),
-                t: p.type.charAt(0) // First char of type
+                t: p.getTypeChar() // Use type char for compact serialization
             })),
             in: this.inputs
         };
@@ -1754,6 +2304,10 @@ class Game {
                 this.paddles[i].width = pd.w || pd.width;
                 this.paddles[i].expanded = pd.e === 1 || pd.expanded;
                 this.paddles[i].sticky = pd.s === 1 || pd.sticky;
+                this.paddles[i].laser = pd.l === 1 || pd.laser;
+                this.paddles[i].magnet = pd.m === 1 || pd.magnet;
+                this.paddles[i].shield = pd.h === 1 || pd.shield;
+                this.paddles[i].laserShots = pd.ls || pd.laserShots || 0;
             }
         }
         
@@ -1781,13 +2335,18 @@ class Game {
             this.blocks = newBlocks;
         }
         
-        // Update power-ups
+        // Update power-ups (network serialization)
         const statePowerUps = state.pu || state.powerUps;
         if (statePowerUps) {
             this.powerUps = statePowerUps.map(p => {
-                const pu = new PowerUp(p.x, p.y, p.t === 'e' ? 'expand' : 
-                                                 p.t === 'm' ? 'multiball' :
-                                                 p.t === 's' ? 'slow' : 'sticky');
+                const type = p.t === 'e' ? 'expand' : 
+                             p.t === 'm' ? 'multiball' :
+                             p.t === 's' ? 'slow' :
+                             p.t === 't' ? 'sticky' :
+                             p.t === 'l' ? 'laser' :
+                             p.t === 'n' ? 'magnet' :
+                             p.t === 'h' ? 'shield' : 'expand';
+                const pu = new PowerUp(p.x, p.y, type);
                 return pu;
             });
         }
@@ -1848,6 +2407,8 @@ class Game {
         this.blocks = [];
         this.paddles = [];
         this.powerUps = [];
+        this.lasers = [];
+        this.floatingTexts = [];
         this.particles.clear();
     }
 }
@@ -1863,6 +2424,8 @@ if (typeof window !== 'undefined') {
     window.Paddle = Paddle;
     window.Block = Block;
     window.PowerUp = PowerUp;
+    window.Laser = Laser;
+    window.FloatingText = FloatingText;
     window.Particle = Particle;
     window.ParticleSystem = ParticleSystem;
     window.Vec2 = Vec2;
@@ -1877,6 +2440,8 @@ export {
     Paddle,
     Block,
     PowerUp,
+    Laser,
+    FloatingText,
     Particle,
     ParticleSystem,
     Vec2,

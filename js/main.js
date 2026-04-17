@@ -3,13 +3,12 @@
  * Orchestrates game engine, networking, levels, and UI
  * Cooperative multiplayer Arkanoid with WebRTC
  * 
- * ITERATION 10: Enhanced P2P Synchronization Precision
- * - Input prediction for guest (predict local paddle)
- * - Jitter buffer for incoming state (smooth interpolation)
- * - Delta compression for inputs
- * - Lag compensation
- * - Desync detection
- */
+     * ITERATION 11: Progression System
+     * - Achievement system (first win, combo master, speed demon)
+     * - LocalStorage high scores and player statistics
+     * - Tutorial overlay for first-time players
+     * - Level unlock progression
+     */
 
 // ============================================================================
 // APPLICATION STATES
@@ -475,6 +474,9 @@ class ArkanoidP2P {
                 }, 32); // Update UI at most at 30fps
             }
             
+            // Initialize progression system
+            this.initProgression();
+            
             // Initialize canvas
             this.setupCanvas();
             
@@ -507,6 +509,9 @@ class ArkanoidP2P {
             // Setup game event handlers
             this.setupGameHandlers();
             
+            // Setup progression event handlers
+            this.setupProgressionHandlers();
+            
             // Setup input handlers
             this.setupInputHandlers();
             
@@ -518,6 +523,9 @@ class ArkanoidP2P {
             
             // Start game loop
             this.requestId = requestAnimationFrame(this.gameLoop);
+            
+            // Show tutorial for first-time players
+            this.showTutorialIfNeeded();
             
             console.log('[Main] Initialization complete');
         } catch (error) {
@@ -906,9 +914,15 @@ class ArkanoidP2P {
     startGame() {
         if (!this.game) return;
         
+        // Start tracking game session for progression
+        this.startGameSession();
+        
         // Load first level (levels are 1-indexed)
         const levelData = this.levels.getLevel(1);
         this.game.loadLevel(levelData);
+        
+        // Start tracking first level for progression
+        this.startLevel(1);
         
         // Reset input states
         this.localInput = { x: 0.5, fire: false };
@@ -1117,6 +1131,11 @@ class ArkanoidP2P {
         const score = this.game.getScore();
         this.ui?.updateScore(score);
         
+        // Track block destruction for progression
+        if (this.progression) {
+            this.progression.onBlockDestroyed();
+        }
+        
         // Check for level complete
         if (this.game.allBlocksDestroyed()) {
             this.onLevelComplete();
@@ -1127,6 +1146,17 @@ class ArkanoidP2P {
     }
     
     onLevelComplete() {
+        const completedLevelIndex = this.levels.currentLevel + 1;
+        const totalScore = this.game?.getScore?.() || 0;
+        
+        // Track level completion for progression
+        const progressionResult = this.completeLevel(true, totalScore);
+        
+        if (progressionResult.newAchievements?.length > 0) {
+            // Achievements will be shown automatically via the achievement notification system
+            console.log('[Main] New achievements:', progressionResult.newAchievements.map(a => a.name));
+        }
+        
         const nextLevelIndex = this.levels.currentLevel + 1;
         
         if (nextLevelIndex >= LevelManager.TOTAL_LEVELS) {
@@ -1140,6 +1170,9 @@ class ArkanoidP2P {
             // Advance to next level
             LevelManager.currentLevel = nextLevelIndex;
             const levelData = this.levels.getLevel(nextLevelIndex);
+            
+            // Start tracking new level for progression
+            this.startLevel(nextLevelIndex + 1);
             
             // Notify remote
             this.network?.send({
@@ -1156,6 +1189,11 @@ class ArkanoidP2P {
     }
     
     onGameOver(data) {
+        const totalScore = this.game?.getScore?.() || 0;
+        
+        // Track game over for progression
+        this.completeLevel(false, totalScore);
+        
         this.transitionTo(APP_STATES.GAME_OVER);
         this.network?.send({
             type: MESSAGE_TYPES.GAME_OVER,
@@ -1164,6 +1202,9 @@ class ArkanoidP2P {
     }
     
     onPowerUpCollected(data) {
+        // Track for progression
+        this.progression?.onPowerUpCollected();
+        
         // Update UI
         this.ui?.showPowerUpMessage(data.type);
         
@@ -1532,6 +1573,150 @@ class ArkanoidP2P {
     handleRemoteBonus(message) {
         // Apply remote bonus if needed
         this.game?.applyExternalBonus?.(message);
+    }
+    
+    // ============================================================================
+    // PROGRESSION SYSTEM
+    // ============================================================================
+    
+    initProgression() {
+        // ProgressionManager is already initialized globally in progression.js
+        // Store reference for easy access
+        this.progression = window.progressionManager;
+        
+        if (!this.progression) {
+            console.warn('[Main] Progression manager not available');
+            return;
+        }
+        
+        console.log('[Main] Progression system initialized');
+        console.log('[Main] Unlocked levels:', this.progression.getHighestUnlockedLevel());
+        console.log('[Main] Achievements unlocked:', this.progression.getUnlockedAchievements().length);
+    }
+    
+    setupProgressionHandlers() {
+        if (!this.progression) return;
+        
+        // Listen for achievement unlocks
+        window.addEventListener('achievement-unlocked', (e) => {
+            console.log('[Progression] Achievement unlocked:', e.detail.name);
+        });
+        
+        // Listen for level unlocks
+        window.addEventListener('level-unlocked', (e) => {
+            console.log('[Progression] Level unlocked:', e.detail.level);
+        });
+    }
+    
+    showTutorialIfNeeded() {
+        if (!this.progression) return;
+        
+        if (!this.progression.hasSeenTutorial()) {
+            // Show tutorial after a short delay
+            setTimeout(() => {
+                const tutorial = new TutorialOverlay('game-container');
+                tutorial.show(() => {
+                    // Tutorial complete
+                    console.log('[Progression] Tutorial completed');
+                });
+            }, 500);
+        }
+    }
+    
+    // Called when a new game session starts
+    startGameSession() {
+        if (this.progression) {
+            // Determine if multiplayer
+            const isMultiplayer = !!this.network?.isConnected?.();
+            this.progression.startGameSession(isMultiplayer);
+        }
+    }
+    
+    // Called when a level starts
+    startLevel(levelNumber) {
+        if (this.progression) {
+            const isMultiplayer = !!this.network?.isConnected?.();
+            this.progression.startLevel(levelNumber, isMultiplayer);
+        }
+    }
+    
+    // Called when a level completes
+    completeLevel(completed, finalScore) {
+        if (!this.progression) return { completed };
+        
+        const result = this.progression.endLevel(completed, finalScore);
+        
+        // Update high score display if applicable
+        if (result.highScoreRank) {
+            console.log('[Progression] New high score! Rank:', result.highScoreRank);
+        }
+        
+        return result;
+    }
+    
+    // Called when a block is destroyed
+    onBlockDestroyed(data) {
+        if (this.progression) {
+            this.progression.onBlockDestroyed();
+        }
+    }
+    
+    // Called when combo breaks
+    onComboBreak() {
+        if (this.progression) {
+            this.progression.onComboBreak();
+        }
+    }
+    
+    // Called when power-up is collected
+    onPowerUpCollected(data) {
+        if (this.progression) {
+            this.progression.onPowerUpCollected();
+        }
+        
+        // existing code for UI update
+        this.ui?.showPowerUpMessage(data.type);
+        
+        // Sync with remote
+        if (this.isHost) {
+            this.network?.send({
+                type: MESSAGE_TYPES.BONUS,
+                ...data
+            });
+        }
+    }
+    
+    // Called when player dies/loses life
+    onLifeLost() {
+        if (this.progression) {
+            this.progression.onDeath();
+        }
+    }
+    
+    // Check if a level is unlocked
+    isLevelUnlocked(levelNumber) {
+        if (!this.progression) return levelNumber === 1;
+        return this.progression.isLevelUnlocked(levelNumber);
+    }
+    
+    // Get progression stats
+    getProgressionStats() {
+        return this.progression?.getStats() || null;
+    }
+    
+    // Export progress data
+    exportProgress() {
+        return this.progression?.exportProgress() || null;
+    }
+    
+    // Import progress data
+    importProgress(data) {
+        return this.progression?.importProgress(data) || false;
+    }
+    
+    // Reset all progression
+    resetProgression() {
+        this.progression?.resetAll();
     }
 }
 

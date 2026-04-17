@@ -104,13 +104,38 @@ const UIController = (function() {
         // Set up mouse/pointer controls
         setupMouseControls();
 
+        // Add button ripple effects
+        addRippleEffects();
+
+        // Initialize loading screen elements
+        initLoadingScreen();
+
         // Show initial screen
-        showScreen('MENU');
+        showScreen('MENU', { eager: true });
 
         // Set up network event listeners if network module exists
         setupNetworkIntegration();
 
         console.log('[UI] Initialized');
+    }
+
+    /**
+     * Initialize loading screen structure if not present
+     */
+    function initLoadingScreen() {
+        const loadingScreen = document.getElementById(SCREENS.LOADING);
+        if (loadingScreen && !loadingScreen.querySelector('.loading-container')) {
+            loadingScreen.innerHTML = `
+                <div class="loading-container">
+                    <div class="loading-logo">GOP-STOP</div>
+                    <div class="loading-spinner"></div>
+                    <div class="loading-progress">
+                        <div class="loading-progress-bar indeterminate"></div>
+                    </div>
+                    <div class="loading-status" id="loading-text">LOADING...</div>
+                </div>
+            `;
+        }
     }
 
     /**
@@ -208,31 +233,55 @@ const UIController = (function() {
     // ==================== SCREEN MANAGEMENT ====================
 
     /**
-     * Show specific screen
+     * Show specific screen with enhanced transitions
      * @param {string} screenName - Screen name (MENU, ROOM, GAME, etc.)
+     * @param {Object} options - Transition options
      */
-    function showScreen(screenName) {
+    function showScreen(screenName, options = {}) {
         const screenId = SCREENS[screenName];
         if (!screenId) {
             console.error(`[UI] Unknown screen: ${screenName}`);
             return;
         }
 
-        // Hide all screens
-        Object.values(SCREENS).forEach(id => {
-            const screen = document.getElementById(id);
-            if (screen) {
-                screen.classList.remove('active');
-            }
-        });
+        const { 
+            direction = 'up', 
+            duration = 500,
+            eager = false 
+        } = options;
 
-        // Show target screen
-        const targetScreen = document.getElementById(screenId);
-        if (targetScreen) {
-            targetScreen.classList.add('active');
-            state.currentScreen = screenName;
-            console.log(`[UI] Switched to screen: ${screenName}`);
+        // Exit animation for current screen
+        if (state.currentScreen) {
+            const currentScreenId = SCREENS[state.currentScreen];
+            const currentScreen = document.getElementById(currentScreenId);
+            if (currentScreen) {
+                currentScreen.classList.add('exiting');
+                
+                // Remove exiting class after animation
+                setTimeout(() => {
+                    currentScreen.classList.remove('exiting', 'active');
+                }, duration * 0.6);
+            }
         }
+
+        // Show target screen with entrance animation
+        setTimeout(() => {
+            const targetScreen = document.getElementById(screenId);
+            if (targetScreen) {
+                // Add entrance animation class based on direction
+                targetScreen.classList.remove('exiting');
+                targetScreen.classList.add('active');
+                
+                // Apply staggered animation to children
+                applyStaggeredAnimations(targetScreen);
+                
+                state.currentScreen = screenName;
+                console.log(`[UI] Switched to screen: ${screenName}`);
+                
+                // Trigger haptic feedback on screen change (mobile)
+                triggerHaptic('light');
+            }
+        }, eager ? 0 : state.currentScreen ? duration * 0.3 : 0);
 
         // Update game pause state
         if (screenName === 'PAUSE') {
@@ -241,6 +290,216 @@ const UIController = (function() {
             state.isPaused = false;
             if (callbacks.onGameResume) callbacks.onGameResume();
         }
+    }
+
+    /**
+     * Apply staggered animations to screen children
+     * @param {HTMLElement} screen - Screen element
+     */
+    function applyStaggeredAnimations(screen) {
+        const animatableElements = screen.querySelectorAll('.btn, h1, h2, h3, .logo, .room-section, .stat-item');
+        animatableElements.forEach((el, index) => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(20px)';
+            
+            setTimeout(() => {
+                el.style.transition = 'opacity 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)';
+                el.style.opacity = '1';
+                el.style.transform = 'translateY(0)';
+            }, 100 + (index * 50));
+        });
+    }
+
+    /**
+     * Show loading screen with progress
+     * @param {string} message - Loading message
+     * @param {number} progress - Progress percentage (0-100)
+     */
+    function showLoading(message = 'LOADING...', progress = null) {
+        showScreen('LOADING');
+        setLoadingText(message);
+        
+        if (progress !== null) {
+            updateLoadingProgress(progress);
+        } else {
+            setIndeterminateProgress();
+        }
+    }
+
+    /**
+     * Update loading progress bar
+     * @param {number} percent - Progress percentage (0-100)
+     */
+    function updateLoadingProgress(percent) {
+        const progressBar = document.querySelector('.loading-progress-bar');
+        if (progressBar) {
+            progressBar.classList.remove('indeterminate');
+            progressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+        }
+    }
+
+    /**
+     * Set indeterminate loading progress
+     */
+    function setIndeterminateProgress() {
+        const progressBar = document.querySelector('.loading-progress-bar');
+        if (progressBar) {
+            progressBar.style.width = '';
+            progressBar.classList.add('indeterminate');
+        }
+    }
+
+    /**
+     * Enhanced show toast with animation options
+     * @param {string} message - Toast message
+     * @param {string} type - Toast type
+     * @param {number} duration - Duration in ms
+     * @param {Object} options - Additional options
+     */
+    function showToast(message, type = TOAST_TYPES.INFO, duration = 3000, options = {}) {
+        const { position = 'top-right', animated = true } = options;
+        
+        const toast = document.createElement('div');
+        
+        // Colors based on type
+        const colors = {
+            [TOAST_TYPES.INFO]: { border: '#00ffff', bg: 'rgba(0, 255, 255, 0.1)', glow: '#00ffff' },
+            [TOAST_TYPES.SUCCESS]: { border: '#00ff00', bg: 'rgba(0, 255, 0, 0.1)', glow: '#00ff00' },
+            [TOAST_TYPES.WARNING]: { border: '#ffff00', bg: 'rgba(255, 255, 0, 0.1)', glow: '#ffff00' },
+            [TOAST_TYPES.ERROR]: { border: '#ff0040', bg: 'rgba(255, 0, 64, 0.1)', glow: '#ff0040' }
+        };
+        
+        const color = colors[type] || colors[TOAST_TYPES.INFO];
+
+        // Build toast styles based on position
+        const positionStyles = {
+            'top-right': 'top: 20px; right: 20px;',
+            'top-left': 'top: 20px; left: 20px;',
+            'bottom-right': 'bottom: 20px; right: 20px;',
+            'bottom-left': 'bottom: 20px; left: 20px;',
+            'center': 'top: 50%; left: 50%; transform: translate(-50%, -50%);'
+        };
+
+        toast.style.cssText = `
+            background: ${color.bg};
+            border: 2px solid ${color.border};
+            color: #fff;
+            padding: 16px 24px;
+            font-family: 'Press Start 2P', monospace;
+            font-size: 12px;
+            box-shadow: 
+                0 0 15px ${color.glow}40,
+                0 0 30px ${color.glow}20;
+            clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+            pointer-events: auto;
+            max-width: 350px;
+            word-wrap: break-word;
+            position: fixed;
+            ${positionStyles[position] || positionStyles['top-right']}
+            z-index: 10000;
+            opacity: 0;
+            transform: ${animated ? 'translateX(100px) scale(0.9)' : 'none'};
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        `;
+        
+        // Add icon based on type
+        const icons = {
+            [TOAST_TYPES.INFO]: 'ℹ',
+            [TOAST_TYPES.SUCCESS]: '✓',
+            [TOAST_TYPES.WARNING]: '⚠',
+            [TOAST_TYPES.ERROR]: '✗'
+        };
+        
+        toast.innerHTML = `
+            <span style="color: ${color.glow}; margin-right: 8px;">${icons[type]}</span>
+            ${message}
+        `;
+
+        document.body.appendChild(toast);
+        
+        // Trigger entrance animation
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = position === 'center' ? 'translate(-50%, -50%) scale(1)' : 'translateX(0) scale(1)';
+        });
+
+        // Add click to dismiss
+        toast.addEventListener('click', () => {
+            dismissToast(toast);
+        });
+
+        // Auto dismiss
+        setTimeout(() => {
+            dismissToast(toast);
+        }, duration);
+
+        // Trigger haptic
+        if (type === TOAST_TYPES.ERROR) {
+            triggerHaptic('error');
+        } else if (type === TOAST_TYPES.SUCCESS) {
+            triggerHaptic('success');
+        }
+
+        console.log(`[UI] Toast: ${message} (${type})`);
+    }
+
+    /**
+     * Dismiss toast with exit animation
+     * @param {HTMLElement} toast - Toast element
+     */
+    function dismissToast(toast) {
+        if (!toast || toast.dataset.dismissed) return;
+        toast.dataset.dismissed = 'true';
+        
+        toast.style.opacity = '0';
+        toast.style.transform = 'scale(0.9)';
+        
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.remove();
+            }
+        }, 300);
+    }
+
+    /**
+     * Create ripple effect on element click
+     * @param {Event} e - Click event
+     * @param {HTMLElement} element - Target element
+     */
+    function createRipple(e, element) {
+        const ripple = document.createElement('span');
+        const rect = element.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height);
+        const x = e.clientX - rect.left - size / 2;
+        const y = e.clientY - rect.top - size / 2;
+        
+        ripple.style.cssText = `
+            position: absolute;
+            width: ${size}px;
+            height: ${size}px;
+            left: ${x}px;
+            top: ${y}px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            transform: scale(0);
+            animation: ripple 0.6s ease-out;
+            pointer-events: none;
+        `;
+        
+        element.style.position = 'relative';
+        element.style.overflow = 'hidden';
+        element.appendChild(ripple);
+        
+        setTimeout(() => ripple.remove(), 600);
+    }
+
+    /**
+     * Add ripple effect to all buttons
+     */
+    function addRippleEffects() {
+        document.querySelectorAll('.btn').forEach(btn => {
+            btn.addEventListener('click', (e) => createRipple(e, btn));
+        });
     }
 
     // ==================== EVENT LISTENERS ====================
@@ -1736,8 +1995,9 @@ const UIController = (function() {
      * @param {string} text - Loading message
      */
     function setLoadingText(text) {
-        if (elements.loadingText) {
-            elements.loadingText.textContent = text;
+        const loadingText = document.getElementById('loading-text') || elements.loadingText;
+        if (loadingText) {
+            loadingText.textContent = text?.toUpperCase() || 'LOADING...';
         }
     }
 
@@ -1807,7 +2067,19 @@ const UIController = (function() {
         
         // Notifications
         showToast,
+        dismissToast,
         TOAST_TYPES,
+        
+        // Visual polish functions
+        addRippleEffects,
+        createRipple,
+        applyStaggeredAnimations,
+        
+        // Loading
+        showLoading,
+        setLoadingText,
+        updateLoadingProgress,
+        setIndeterminateProgress,
         
         // Game state
         getState,
@@ -1817,9 +2089,6 @@ const UIController = (function() {
         
         // Network
         getNetwork,
-        
-        // Loading
-        setLoadingText,
         
         // Constants
         SCREENS
