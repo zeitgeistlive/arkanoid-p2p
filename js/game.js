@@ -1902,7 +1902,7 @@ class Game {
 
     collectPowerUp(powerUp, paddle) {
         this.stats.powerUpsCollected++;
-        const props = PowerUp.prototype.types[powerUp.type];
+        const props = powerUp.types[powerUp.type] || { color: '#FFF', duration: 10 };
         
         switch (powerUp.type) {
             case 'expand':
