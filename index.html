@@ -148,6 +148,7 @@
               <div class="hud-value text-magenta" id="lives-display">♥♥♥</div>
             </div>
             <button class="btn btn--small" id="btn-pause">PAUSE</button>
+            <button class="btn btn--small" id="btn-mute" title="Toggle Mute">🔊</button>
           </div>
         </header>
         
@@ -308,6 +309,7 @@
   <script src="js/performance.js"></script>
   <script src="js/network.js"></script>
   <script src="js/levels.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/game.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
@@ -355,6 +357,15 @@
       // Pause Screen
       document.getElementById('btn-pause')?.addEventListener('click', () => {
         showScreen('screen-pause');
+      });
+      
+      // Mute toggle
+      document.getElementById('btn-mute')?.addEventListener('click', () => {
+        if (typeof audioSynth !== 'undefined') {
+          const isMuted = audioSynth.toggleMute();
+          const btn = document.getElementById('btn-mute');
+          if (btn) btn.textContent = isMuted ? '🔇' : '🔊';
+        }
       });
       
       document.getElementById('btn-resume')?.addEventListener('click', () => {

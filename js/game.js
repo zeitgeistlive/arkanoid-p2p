@@ -1310,6 +1310,11 @@ class Game {
             collision.normal.y,
             paddle.color
         );
+
+        // Audio feedback
+        if (typeof audioSynth !== 'undefined') {
+            audioSynth.paddleHit();
+        }
         
         // Increment combo
         this.combo++;

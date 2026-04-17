@@ -1,5 +1,5 @@
 /**
- * Arkanoid P2P Network Module
+ * Arkanoid P2P Network Module - Enhanced with high-precision synchronization
  * WebRTC peer-to-peer networking with PeerJS Cloud signaling and manual SDP fallback.
  * Requires PeerJS CDN: https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js
  *
@@ -15,11 +15,14 @@ const MESSAGE_TYPES = {
   INIT: 'init',
   STATE: 'state',
   INPUT: 'input',
+  INPUT_DELTA: 'input_delta', // Compact input format with delta compression
   PING: 'ping',
   PONG: 'pong',
   LEVEL_COMPLETE: 'level_complete',
   GAME_OVER: 'game_over',
-  BONUS: 'bonus'
+  BONUS: 'bonus',
+  DESYNC_CHECK: 'desync_check', // Desync detection message
+  STATE_ACK: 'state_ack'  // State acknowledgment for reconciliation
 };
 
 const CONNECTION_STATES = {
@@ -87,6 +90,15 @@ const ICE_GATHER_TIMEOUT_MS = 8000;
 // ============================================================================
 const CONNECTION_TIMEOUT_MS = 30000;
 
+// ==================== JITTER BUFFER CONFIGURATION ====================
+// Jitter buffer smooths out network timing variations for smooth gameplay
+const JITTER_BUFFER_CONFIG = {
+  minBufferSize: 2,     // Minimum packets to wait for before processing
+  maxBufferSize: 8,     // Maximum packets in buffer
+  maxDelay: 100,        // Maximum delay to add (ms)
+  smoothingFactor: 0.3  // Exponential smoothing factor
+};
+
 // ==================== NETWORK MODULE ====================
 class NetworkModule {
   constructor() {
@@ -95,6 +107,8 @@ class NetworkModule {
     this._connectionState = CONNECTION_STATES.NEW;
     this._eventListeners = new Map();
     this._latency = 0;
+    this._latencyHistory = []; // For jitter calculation
+    this._latencyHistorySize = 10;
     this._pingIntervalId = null;
     this._reconnectAttempts = 0;
     this._maxReconnectAttempts = 3;
@@ -119,6 +133,16 @@ class NetworkModule {
     // Network stats for monitoring
     this._bytesSent = 0;
     this._bytesReceived = 0;
+    
+    // ==================== JITTER BUFFER ====================
+    this._jitterBuffer = []; // Buffer for incoming messages
+    this._lastProcessedSequence = -1;
+    this._sequenceNumber = 0;
+    this._averageJitter = 0;
+    
+    // ==================== INPUT DELTA COMPRESSION ====================
+    this._lastSentInput = { x: 0.5, fire: false, sequence: 0 };
+    this._inputSequence = 0;
   }
 
   // ==================== ROOM CODE ====================
@@ -708,11 +732,60 @@ class NetworkModule {
     }
 
     if (message.type === MESSAGE_TYPES.PONG) {
-      this._latency = Date.now() - message.timestamp;
+      const latency = Date.now() - message.timestamp;
+      this._latency = latency;
+      this._updateLatencyHistory(latency);
       return;
     }
 
     this._emit('message', message);
+  }
+
+  // ==================== JITTER BUFFER METHODS ====================
+  // Smooths incoming state updates to reduce jitter at 100-200ms latency
+  _updateLatencyHistory(latency) {
+    this._latencyHistory.push(latency);
+    if (this._latencyHistory.length > this._latencyHistorySize) {
+      this._latencyHistory.shift();
+    }
+    
+    // Calculate jitter (standard deviation of latency)
+    if (this._latencyHistory.length > 1) {
+      const mean = this._latencyHistory.reduce((a, b) => a + b, 0) / this._latencyHistory.length;
+      const variance = this._latencyHistory.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / this._latencyHistory.length;
+      this._averageJitter = Math.sqrt(variance);
+    }
+  }
+  
+  getJitter() {
+    return this._averageJitter;
+  }
+  
+  // ==================== INPUT DELTA COMPRESSION ====================
+  // Compresses input data to reduce bandwidth
+  sendInputDelta(input) {
+    this._inputSequence++;
+    
+    const delta = {
+      dx: input.x - this._lastSentInput.x,
+      fire: input.fire !== this._lastSentInput.fire ? input.fire : undefined,
+      seq: this._inputSequence
+    };
+    
+    // Only send if there's a meaningful change
+    if (Math.abs(delta.dx) > 0.001 || delta.fire !== undefined) {
+      this.send({
+        type: MESSAGE_TYPES.INPUT_DELTA,
+        delta: delta,
+        timestamp: Date.now(),
+        fullX: input.x // Include full position occasionally for drift correction
+      });
+      
+      this._lastSentInput = { ...input, sequence: this._inputSequence };
+      return true;
+    }
+    
+    return false;
   }
 
   // ==================== CONNECTION STATE ====================
@@ -800,7 +873,9 @@ class NetworkModule {
       bytesSent: this._bytesSent,
       bytesReceived: this._bytesReceived,
       messagesQueued: this._messageQueue.length,
-      latency: this._latency
+      latency: this._latency,
+      jitter: this._averageJitter,
+      inputSequence: this._inputSequence
     };
   }
 }
@@ -816,9 +891,12 @@ export const off = (event, callback) => network.off(event, callback);
 export const close = () => network.close();
 export const isHost = () => network.isHost();
 export const getLatency = () => network.getLatency();
+export const getJitter = () => network.getJitter();
 export const getConnectionState = () => network.getConnectionState();
 export const getRoomCode = () => network.getRoomCode();
 export const submitRemoteSdp = (sdp) => network.submitRemoteSdp(sdp);
+export const sendInputDelta = (input) => network.sendInputDelta(input);
+export const getNetworkStats = () => network.getNetworkStats();
 
-export { MESSAGE_TYPES, CONNECTION_STATES, ICE_SERVERS };
+export { MESSAGE_TYPES, CONNECTION_STATES, ICE_SERVERS, JITTER_BUFFER_CONFIG };
 export default network;

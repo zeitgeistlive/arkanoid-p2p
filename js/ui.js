@@ -47,7 +47,16 @@ const UIController = (function() {
         isPaused: false,
         touchActive: false,
         keyState: {},
-        mousePosition: { x: 0, y: 0 }
+        mousePosition: { x: 0, y: 0 },
+        hapticsDisabled: false
+    };
+
+    // ==================== MOBILE FEATURES ====================
+    const MOBILE_FEATURES = {
+        VIRTUAL_JOYSTICK: true,
+        HAPTIC_FEEDBACK: true,
+        ORIENTATION_HANDLING: true,
+        FULLSCREEN: true
     };
 
     // ==================== DOM ELEMENTS CACHE ====================
@@ -64,7 +73,8 @@ const UIController = (function() {
         onGameQuit: null,
         onNextLevel: null,
         onPaddleMove: null,
-        onLaunchBall: null
+        onLaunchBall: null,
+        onOrientationChange: null
     };
 
     // ==================== INITIALIZATION ====================
@@ -524,6 +534,777 @@ const UIController = (function() {
             elements.touchLeft.style.display = 'none';
             elements.touchRight.style.display = 'none';
         }
+        // Also disable virtual joystick
+        disableVirtualJoystick();
+    }
+
+    // ==================== VIRTUAL JOYSTICK ====================
+
+    /**
+     * Virtual Joystick State
+     */
+    const joystickState = {
+        active: false,
+        touchId: null,
+        centerX: 0,
+        centerY: 0,
+        currentX: 0,
+        currentY: 0,
+        maxRadius: 60,
+        valueX: 0,
+        valueY: 0,
+        element: null,
+        stickElement: null,
+        animationFrame: null
+    };
+
+    /**
+     * Initialize virtual joystick for mobile devices
+     * Creates a circular touch area for analog-like paddle control
+     */
+    function initVirtualJoystick() {
+        // Only initialize on touch devices
+        if (!window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+            return;
+        }
+
+        // Create joystick container if it doesn't exist
+        let joystickContainer = document.getElementById('virtual-joystick');
+        if (!joystickContainer) {
+            joystickContainer = document.createElement('div');
+            joystickContainer.id = 'virtual-joystick';
+            joystickContainer.innerHTML = `
+                <div class="joystick-base">
+                    <div class="joystick-stick"></div>
+                </div>
+            `;
+            document.body.appendChild(joystickContainer);
+
+            // Add styles if not already present
+            if (!document.getElementById('joystick-styles')) {
+                const style = document.createElement('style');
+                style.id = 'joystick-styles';
+                style.textContent = `
+                    #virtual-joystick {
+                        position: fixed;
+                        bottom: 20px;
+                        left: 20px;
+                        width: 140px;
+                        height: 140px;
+                        z-index: 999;
+                        display: none;
+                        touch-action: none;
+                        -webkit-touch-callout: none;
+                        -webkit-user-select: none;
+                        user-select: none;
+                    }
+                    
+                    #virtual-joystick.visible {
+                        display: block;
+                    }
+                    
+                    .joystick-base {
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 255, 255, 0.1);
+                        border: 3px solid rgba(0, 255, 255, 0.3);
+                        border-radius: 50%;
+                        position: relative;
+                        backdrop-filter: blur(4px);
+                    }
+                    
+                    .joystick-stick {
+                        width: 50px;
+                        height: 50px;
+                        background: linear-gradient(135deg, rgba(0, 255, 255, 0.6), rgba(255, 0, 255, 0.6));
+                        border: 2px solid #00ffff;
+                        border-radius: 50%;
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+                        transition: transform 0.05s ease-out;
+                        pointer-events: none;
+                    }
+                    
+                    .joystick-base:active .joystick-stick,
+                    .joystick-base.active .joystick-stick {
+                        background: linear-gradient(135deg, rgba(0, 255, 255, 0.9), rgba(255, 0, 255, 0.9));
+                        box-shadow: 0 0 30px rgba(0, 255, 255, 0.8);
+                    }
+                    
+                    /* Show joystick only in game screen on mobile */
+                    @media (hover: none) and (pointer: coarse) {
+                        #screen-game.active ~ #virtual-joystick,
+                        #virtual-joystick.game-active {
+                            display: block;
+                        }
+                    }
+                    
+                    /* Alternative positions for landscape */
+                    @media (orientation: landscape) and (hover: none) and (pointer: coarse) {
+                        #virtual-joystick {
+                            bottom: 50%;
+                            left: 20px;
+                            transform: translateY(50%);
+                        }
+                    }
+                    
+                    /* Smaller on very small screens */
+                    @media (max-width: 360px) {
+                        #virtual-joystick {
+                            width: 100px;
+                            height: 100px;
+                        }
+                        .joystick-stick {
+                            width: 40px;
+                            height: 40px;
+                        }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        }
+
+        joystickState.element = joystickContainer.querySelector('.joystick-base');
+        joystickState.stickElement = joystickContainer.querySelector('.joystick-stick');
+
+        // Set up touch events
+        joystickContainer.addEventListener('touchstart', handleJoystickStart, { passive: false });
+        joystickContainer.addEventListener('touchmove', handleJoystickMove, { passive: false });
+        joystickContainer.addEventListener('touchend', handleJoystickEnd, { passive: false });
+        joystickContainer.addEventListener('touchcancel', handleJoystickEnd, { passive: false });
+
+        console.log('[UI] Virtual joystick initialized');
+    }
+
+    /**
+     * Handle joystick touch start
+     * @param {TouchEvent} e 
+     */
+    function handleJoystickStart(e) {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const rect = joystickState.element.getBoundingClientRect();
+        
+        joystickState.active = true;
+        joystickState.touchId = touch.identifier;
+        joystickState.centerX = rect.left + rect.width / 2;
+        joystickState.centerY = rect.top + rect.height / 2;
+        joystickState.currentX = touch.clientX;
+        joystickState.currentY = touch.clientY;
+        
+        joystickState.element.classList.add('active');
+        
+        // Haptic feedback on touch start
+        triggerHaptic('light');
+        
+        updateJoystickPosition();
+    }
+
+    /**
+     * Handle joystick touch move
+     * @param {TouchEvent} e 
+     */
+    function handleJoystickMove(e) {
+        if (!joystickState.active) return;
+        e.preventDefault();
+        
+        const touch = Array.from(e.changedTouches).find(t => t.identifier === joystickState.touchId);
+        if (!touch) return;
+        
+        joystickState.currentX = touch.clientX;
+        joystickState.currentY = touch.clientY;
+        
+        updateJoystickPosition();
+    }
+
+    /**
+     * Handle joystick touch end
+     * @param {TouchEvent} e 
+     */
+    function handleJoystickEnd(e) {
+        const touch = Array.from(e.changedTouches).find(t => t.identifier === joystickState.touchId);
+        if (!touch) return;
+        
+        joystickState.active = false;
+        joystickState.touchId = null;
+        joystickState.valueX = 0;
+        joystickState.valueY = 0;
+        
+        joystickState.element.classList.remove('active');
+        
+        // Reset stick position
+        if (joystickState.stickElement) {
+            joystickState.stickElement.style.transform = 'translate(-50%, -50%)';
+        }
+        
+        // Haptic feedback on release
+        triggerHaptic('light');
+    }
+
+    /**
+     * Update joystick visual position and calculate values
+     */
+    function updateJoystickPosition() {
+        if (!joystickState.stickElement) return;
+        
+        const deltaX = joystickState.currentX - joystickState.centerX;
+        const deltaY = joystickState.currentY - joystickState.centerY;
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        const angle = Math.atan2(deltaY, deltaX);
+        
+        // Clamp to max radius
+        const clampedDistance = Math.min(distance, joystickState.maxRadius);
+        
+        // Calculate normalized values (-1 to 1)
+        joystickState.valueX = (Math.cos(angle) * clampedDistance) / joystickState.maxRadius;
+        joystickState.valueY = (Math.sin(angle) * clampedDistance) / joystickState.maxRadius;
+        
+        // Update stick position
+        const stickX = Math.cos(angle) * clampedDistance;
+        const stickY = Math.sin(angle) * clampedDistance;
+        joystickState.stickElement.style.transform = `translate(calc(-50% + ${stickX}px), calc(-50% + ${stickY}px))`;
+        
+        // Call paddle move callback with joystick value
+        if (callbacks.onPaddleMove && state.currentScreen === 'GAME' && !state.isPaused) {
+            const canvasWidth = elements.gameCanvas?.width || 800;
+            const paddleX = (canvasWidth / 2) + (joystickState.valueX * canvasWidth * 0.4);
+            callbacks.onPaddleMove(Math.max(0, Math.min(canvasWidth, paddleX)), 'joystick');
+        }
+    }
+
+    /**
+     * Enable virtual joystick
+     */
+    function enableVirtualJoystick() {
+        const joystick = document.getElementById('virtual-joystick');
+        if (joystick) {
+            joystick.classList.add('visible');
+            joystick.classList.add('game-active');
+        }
+    }
+
+    /**
+     * Disable virtual joystick
+     */
+    function disableVirtualJoystick() {
+        const joystick = document.getElementById('virtual-joystick');
+        if (joystick) {
+            joystick.classList.remove('visible');
+            joystick.classList.remove('game-active');
+        }
+        joystickState.active = false;
+    }
+
+    /**
+     * Check if joystick is active
+     * @returns {boolean}
+     */
+    function isJoystickActive() {
+        return joystickState.active;
+    }
+
+    /**
+     * Get joystick values
+     * @returns {Object} { x, y } values between -1 and 1
+     */
+    function getJoystickValues() {
+        return {
+            x: joystickState.valueX,
+            y: joystickState.valueY,
+            active: joystickState.active
+        };
+    }
+
+    // ==================== HAPTIC FEEDBACK ====================
+
+    /**
+     * Haptic feedback patterns
+     */
+    const HAPTIC_PATTERNS = {
+        light: 10,       // 10ms light tap
+        medium: 20,      // 20ms medium feedback
+        heavy: 30,       // 30ms strong feedback
+        success: [50, 30, 50],  // Success pattern
+        error: [100, 50, 100, 50, 200],  // Error pattern
+        gameOver: [200, 100, 200],
+        levelUp: [30, 20, 30, 20, 30, 50, 100]
+    };
+
+    /**
+     * Trigger haptic feedback if available
+     * @param {string|number|Array} pattern - Haptic pattern name, duration in ms, or custom array
+     */
+    function triggerHaptic(pattern = 'light') {
+        // Check if vibration API is available and user hasn't disabled it
+        if (!navigator.vibrate || state.hapticsDisabled) {
+            return false;
+        }
+
+        try {
+            let vibratePattern;
+            
+            if (typeof pattern === 'string' && HAPTIC_PATTERNS[pattern]) {
+                vibratePattern = HAPTIC_PATTERNS[pattern];
+            } else if (typeof pattern === 'number') {
+                vibratePattern = pattern;
+            } else if (Array.isArray(pattern)) {
+                vibratePattern = pattern;
+            } else {
+                vibratePattern = HAPTIC_PATTERNS.light;
+            }
+
+            return navigator.vibrate(vibratePattern);
+        } catch (err) {
+            console.warn('[UI] Haptic feedback failed:', err);
+            return false;
+        }
+    }
+
+    /**
+     * Check if haptic feedback is available
+     * @returns {boolean}
+     */
+    function isHapticAvailable() {
+        return !!(navigator.vibrate && !state.hapticsDisabled);
+    }
+
+    /**
+     * Enable/disable haptic feedback
+     * @param {boolean} enabled 
+     */
+    function setHapticsEnabled(enabled) {
+        state.hapticsDisabled = !enabled;
+        // Save preference
+        try {
+            localStorage.setItem('arkanoid_haptics', enabled ? '1' : '0');
+        } catch (e) {
+            // Ignore storage errors
+        }
+    }
+
+    /**
+     * Load haptic preference
+     */
+    function loadHapticPreference() {
+        try {
+            const saved = localStorage.getItem('arkanoid_haptics');
+            state.hapticsDisabled = saved === '0';
+        } catch (e) {
+            state.hapticsDisabled = false;
+        }
+    }
+
+    // ==================== ORIENTATION HANDLING ====================
+
+    /**
+     * Orientation state
+     */
+    const orientationState = {
+        current: screen.orientation?.type || 'unknown',
+        angle: screen.orientation?.angle || 0,
+        isLandscape: false,
+        isPortrait: true
+    };
+
+    /**
+     * Initialize orientation change handling
+     */
+    function initOrientationHandling() {
+        // Update initial state
+        updateOrientationState();
+
+        // Listen for orientation changes
+        if (screen.orientation) {
+            screen.orientation.addEventListener('change', handleOrientationChange);
+        } else {
+            // Fallback for older browsers
+            window.addEventListener('orientationchange', handleOrientationChange);
+        }
+
+        // Also listen to resize for responsive adjustments
+        window.addEventListener('resize', debounce(() => {
+            updateOrientationState();
+            adjustLayoutForOrientation();
+        }, 250));
+
+        console.log('[UI] Orientation handling initialized');
+    }
+
+    /**
+     * Handle orientation change event
+     */
+    function handleOrientationChange() {
+        updateOrientationState();
+        
+        const orientationType = orientationState.isLandscape ? 'landscape' : 'portrait';
+        console.log(`[UI] Orientation changed to: ${orientationType} (${orientationState.angle}°)`);
+
+        // Haptic feedback on orientation change
+        triggerHaptic('light');
+
+        // Adjust layout
+        adjustLayoutForOrientation();
+
+        // Show toast notification
+        if (state.currentScreen === 'GAME') {
+            const message = orientationState.isLandscape 
+                ? 'Landscape mode - Full experience!' 
+                : 'Portrait mode - Rotate for best experience';
+            showToast(message, TOAST_TYPES.INFO, 2000);
+        }
+
+        // Notify game if needed
+        if (callbacks.onOrientationChange) {
+            callbacks.onOrientationChange(orientationState);
+        }
+    }
+
+    /**
+     * Update orientation state
+     */
+    function updateOrientationState() {
+        if (screen.orientation) {
+            orientationState.current = screen.orientation.type;
+            orientationState.angle = screen.orientation.angle;
+        } else if (window.orientation !== undefined) {
+            orientationState.angle = window.orientation;
+        }
+        
+        orientationState.isLandscape = 
+            Math.abs(orientationState.angle) === 90 || 
+            orientationState.current?.includes('landscape');
+        orientationState.isPortrait = !orientationState.isLandscape;
+    }
+
+    /**
+     * Adjust layout based on current orientation
+     */
+    function adjustLayoutForOrientation() {
+        const gameContainer = document.getElementById('game-container');
+        if (!gameContainer) return;
+
+        if (orientationState.isLandscape) {
+            gameContainer.classList.add('landscape');
+            gameContainer.classList.remove('portrait');
+            
+            // Adjust canvas for landscape
+            if (elements.gameCanvas) {
+                elements.gameCanvas.style.maxHeight = '70vh';
+            }
+        } else {
+            gameContainer.classList.add('portrait');
+            gameContainer.classList.remove('landscape');
+            
+            // Adjust canvas for portrait
+            if (elements.gameCanvas) {
+                elements.gameCanvas.style.maxHeight = '50vh';
+            }
+        }
+
+        // Resize canvas after orientation change
+        setTimeout(() => {
+            if (window.dispatchEvent) {
+                window.dispatchEvent(new Event('resize'));
+            }
+        }, 300);
+    }
+
+    /**
+     * Get current orientation state
+     * @returns {Object}
+     */
+    function getOrientationState() {
+        return { ...orientationState };
+    }
+
+    /**
+     * Request specific orientation (if supported)
+     * @param {string} orientation - 'landscape' or 'portrait'
+     */
+    function lockOrientation(orientation) {
+        if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock(orientation).catch(err => {
+                console.warn('[UI] Could not lock orientation:', err);
+            });
+        }
+    }
+
+    /**
+     * Unlock orientation
+     */
+    function unlockOrientation() {
+        if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+        }
+    }
+
+    // ==================== FULLSCREEN ====================
+
+    /**
+     * Fullscreen state
+     */
+    const fullscreenState = {
+        element: null,
+        isActive: false
+    };
+
+    /**
+     * Initialize fullscreen handling
+     */
+    function initFullscreen() {
+        // Add fullscreen button if on mobile
+        if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+            addFullscreenButton();
+        }
+
+        // Listen for fullscreen changes
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    }
+
+    /**
+     * Add fullscreen toggle button
+     */
+    function addFullscreenButton() {
+        let fsButton = document.getElementById('fullscreen-btn');
+        if (fsButton) return;
+
+        fsButton = document.createElement('button');
+        fsButton.id = 'fullscreen-btn';
+        fsButton.innerHTML = '⛶';
+        fsButton.setAttribute('aria-label', 'Toggle Fullscreen');
+        fsButton.style.cssText = `
+            position: fixed;
+            top: var(--space-md);
+            right: var(--space-md);
+            width: 44px;
+            height: 44px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+            font-size: 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            z-index: 10001;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+            transition: all 0.2s ease;
+        `;
+
+        // Show only in game screen
+        const style = document.createElement('style');
+        style.textContent = `
+            #fullscreen-btn {
+                display: none;
+            }
+            #screen-game.active ~ #fullscreen-btn,
+            #fullscreen-btn.visible {
+                display: flex;
+            }
+            #fullscreen-btn:active {
+                background: var(--neon-cyan);
+                color: var(--bg-primary);
+                transform: scale(0.95);
+            }
+        `;
+        document.head.appendChild(style);
+
+        fsButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+
+        // Touch events
+        fsButton.addEventListener('touchstart', (e) => {
+            e.stopPropagation();
+            fsButton.style.background = 'var(--neon-cyan)';
+            fsButton.style.color = 'var(--bg-primary)';
+        }, { passive: true });
+        
+        fsButton.addEventListener('touchend', (e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+            setTimeout(() => {
+                fsButton.style.background = 'rgba(0, 0, 0, 0.7)';
+                fsButton.style.color = 'var(--neon-cyan)';
+            }, 100);
+        });
+
+        document.body.appendChild(fsButton);
+        fullscreenState.element = fsButton;
+    }
+
+    /**
+     * Toggle fullscreen mode
+     */
+    function toggleFullscreen() {
+        const doc = document;
+        const docEl = document.documentElement;
+
+        if (!isFullscreen()) {
+            // Enter fullscreen
+            if (docEl.requestFullscreen) {
+                docEl.requestFullscreen().then(() => {
+                    triggerHaptic('medium');
+                    showToast('Fullscreen enabled', TOAST_TYPES.SUCCESS, 1500);
+                }).catch(err => {
+                    console.warn('[UI] Fullscreen request failed:', err);
+                    showToast('Fullscreen not available', TOAST_TYPES.WARNING);
+                });
+            } else if (docEl.webkitRequestFullscreen) {
+                docEl.webkitRequestFullscreen();
+                triggerHaptic('medium');
+            } else if (docEl.mozRequestFullScreen) {
+                docEl.mozRequestFullScreen();
+                triggerHaptic('medium');
+            } else if (docEl.msRequestFullscreen) {
+                docEl.msRequestFullscreen();
+                triggerHaptic('medium');
+            }
+        } else {
+            // Exit fullscreen
+            if (doc.exitFullscreen) {
+                doc.exitFullscreen().then(() => {
+                    triggerHaptic('light');
+                }).catch(err => {
+                    console.warn('[UI] Exit fullscreen failed:', err);
+                });
+            } else if (doc.webkitExitFullscreen) {
+                doc.webkitExitFullscreen();
+            } else if (doc.mozCancelFullScreen) {
+                doc.mozCancelFullScreen();
+            } else if (doc.msExitFullscreen) {
+                doc.msExitFullscreen();
+            }
+        }
+    }
+
+    /**
+     * Check if fullscreen is active
+     * @returns {boolean}
+     */
+    function isFullscreen() {
+        return !!(document.fullscreenElement || 
+                  document.webkitFullscreenElement || 
+                  document.mozFullScreenElement || 
+                  document.msFullscreenElement);
+    }
+
+    /**
+     * Handle fullscreen change event
+     */
+    function handleFullscreenChange() {
+        fullscreenState.isActive = isFullscreen();
+        
+        // Update button visual state
+        const fsButton = document.getElementById('fullscreen-btn');
+        if (fsButton) {
+            fsButton.innerHTML = fullscreenState.isActive ? '⛶' : '⛶';
+            fsButton.style.borderColor = fullscreenState.isActive 
+                ? 'var(--neon-green)' 
+                : 'var(--neon-cyan)';
+        }
+
+        console.log(`[UI] Fullscreen ${fullscreenState.isActive ? 'enabled' : 'disabled'}`);
+
+        // Trigger haptic
+        if (fullscreenState.isActive) {
+            triggerHaptic('success');
+        }
+    }
+
+    /**
+     * Enter fullscreen (helper function)
+     */
+    function enterFullscreen() {
+        if (!isFullscreen()) {
+            toggleFullscreen();
+        }
+    }
+
+    /**
+     * Exit fullscreen (helper function)
+     */
+    function exitFullscreen() {
+        if (isFullscreen()) {
+            toggleFullscreen();
+        }
+    }
+
+    // ==================== APP-LIKE EXPERIENCE ====================
+
+    /**
+     * Check if running as installed PWA
+     * @returns {boolean}
+     */
+    function isStandalone() {
+        return !!(window.matchMedia('(display-mode: standalone)').matches ||
+                  window.navigator.standalone || // iOS
+                  document.referrer.includes('android-app://'));
+    }
+
+    /**
+     * Initialize app-like features
+     */
+    function initAppMode() {
+        // Prevent default touch behaviors that feel like browser
+        document.addEventListener('touchmove', (e) => {
+            // Prevent pull-to-refresh in standalone mode
+            if (isStandalone() && e.touches[0].clientY < 100) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // Prevent double-tap zoom
+        let lastTouchTime = 0;
+        document.addEventListener('touchend', (e) => {
+            const touchTime = Date.now();
+            if (touchTime - lastTouchTime < 300) {
+                e.preventDefault();
+            }
+            lastTouchTime = touchTime;
+        }, { passive: false });
+
+        // Hide address bar on scroll (mobile browsers)
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                window.scrollTo(0, 1);
+            }, 0);
+        });
+
+        // Show install prompt info if not standalone
+        if (!isStandalone() && window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+            setTimeout(() => {
+                showToast('Tip: Install as app for fullscreen!', TOAST_TYPES.INFO, 5000);
+            }, 3000);
+        }
+
+        console.log('[UI] App mode features initialized. Standalone:', isStandalone());
+    }
+
+    /**
+     * Debounce helper function
+     * @param {Function} func 
+     * @param {number} wait 
+     * @returns {Function}
+     */
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
     }
 
     // ==================== ROOM MANAGEMENT ====================

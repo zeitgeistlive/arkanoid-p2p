@@ -2,6 +2,13 @@
  * Arkanoid P2P - Main Entry Point
  * Orchestrates game engine, networking, levels, and UI
  * Cooperative multiplayer Arkanoid with WebRTC
+ * 
+ * ITERATION 10: Enhanced P2P Synchronization Precision
+ * - Input prediction for guest (predict local paddle)
+ * - Jitter buffer for incoming state (smooth interpolation)
+ * - Delta compression for inputs
+ * - Lag compensation
+ * - Desync detection
  */
 
 // ============================================================================
@@ -20,6 +27,342 @@ const APP_STATES = {
     VICTORY: 'victory',
     ERROR: 'error'
 };
+
+// ============================================================================
+// JITTER BUFFER FOR STATE INTERPOLATION
+// ============================================================================
+
+class JitterBuffer {
+    constructor(config = {}) {
+        this.minSize = config.minSize || 2;
+        this.maxSize = config.maxSize || 8;
+        this.maxDelay = config.maxDelay || 100;
+        this.smoothing = config.smoothingFactor || 0.3;
+        
+        this.buffer = [];
+        this.lastProcessedTime = 0;
+        this.targetDelay = this.maxDelay / 2;
+        this.currentDelay = this.targetDelay;
+    }
+    
+    // Add incoming state to buffer with sequence number
+    add(state, timestamp, sequence) {
+        const entry = { state, timestamp, sequence, receivedAt: performance.now() };
+        
+        // Insert in order
+        const insertIndex = this.buffer.findIndex(e => e.sequence > sequence);
+        if (insertIndex === -1) {
+            this.buffer.push(entry);
+        } else {
+            this.buffer.splice(insertIndex, 0, entry);
+        }
+        
+        // Remove duplicates and limit size
+        this.buffer = this.buffer.filter((e, i, arr) => 
+            i === arr.findIndex(t => t.sequence === e.sequence)
+        ).slice(-this.maxSize);
+    }
+    
+    // Get next state to process, accounting for jitter
+    get() {
+        if (this.buffer.length < this.minSize) {
+            return null; // Not enough buffered
+        }
+        
+        const now = performance.now();
+        this.currentDelay += (this.targetDelay - this.currentDelay) * this.smoothing;
+        
+        // Find oldest entry that satisfies our delay requirement
+        const targetTime = now - this.currentDelay;
+        const entry = this.buffer.find(e => e.receivedAt <= targetTime);
+        
+        if (entry) {
+            this.buffer = this.buffer.filter(e => e !== entry);
+            return entry.state;
+        }
+        
+        return null;
+    }
+    
+    // Get interpolated state between buffered states
+    interpolate(alpha = 0.5) {
+        if (this.buffer.length < 2) return null;
+        
+        const [older, newer] = this.buffer.slice(0, 2);
+        return this._interpolateStates(older.state, newer.state, alpha);
+    }
+    
+    _interpolateStates(a, b, t) {
+        const result = { ...a };
+        
+        // Interpolate positions
+        if (a.ball && b.ball) {
+            result.ball = {
+                x: a.ball.x + (b.ball.x - a.ball.x) * t,
+                y: a.ball.y + (b.ball.y - a.ball.y) * t,
+                vx: a.ball.vx + (b.ball.vx - a.ball.vx) * t,
+                vy: a.ball.vy + (b.ball.vy - a.ball.vy) * t
+            };
+        }
+        
+        // Interpolate paddles
+        if (a.paddles && b.paddles) {
+            result.paddles = [
+                { x: a.paddles[0].x + (b.paddles[0].x - a.paddles[0].x) * t },
+                { x: a.paddles[1].x + (b.paddles[1].x - a.paddles[1].x) * t }
+            ];
+        }
+        
+        return result;
+    }
+    
+    clear() {
+        this.buffer = [];
+    }
+}
+
+// ============================================================================
+// INPUT PREDICTOR FOR GUEST
+// ============================================================================
+
+class InputPredictor {
+    constructor() {
+        this.history = []; // Last N inputs for prediction
+        this.maxHistory = 5;
+        this.predictedInput = { x: 0.5, fire: false };
+        this.confidence = 0;
+    }
+    
+    // Record actual input for learning
+    record(input) {
+        this.history.push({ ...input, timestamp: performance.now() });
+        if (this.history.length > this.maxHistory) {
+            this.history.shift();
+        }
+    }
+    
+    // Predict next input based on velocity
+    predict(dt) {
+        if (this.history.length < 2) {
+            return this.predictedInput;
+        }
+        
+        const current = this.history[this.history.length - 1];
+        const previous = this.history[this.history.length - 2];
+        
+        // Calculate velocity
+        const dt_historical = current.timestamp - previous.timestamp;
+        if (dt_historical <= 0) return current;
+        
+        const velocityX = (current.x - previous.x) / dt_historical;
+        
+        // Predict next position based on velocity
+        const predictionTime = dt || 16; // Default to ~60fps
+        let predictedX = current.x + velocityX * predictionTime;
+        
+        // Clamp to valid range
+        predictedX = Math.max(0, Math.min(1, predictedX));
+        
+        // Calculate confidence based on velocity consistency
+        if (this.history.length >= 3) {
+            const v1 = (this.history[1].x - this.history[0].x) / 
+                       (this.history[1].timestamp - this.history[0].timestamp);
+            const v2 = velocityX;
+            const velocityChange = Math.abs(v2 - v1);
+            this.confidence = Math.max(0, 1 - velocityChange * 10);
+        }
+        
+        this.predictedInput = {
+            x: predictedX,
+            fire: false // Don't predict fire action
+        };
+        
+        return this.predictedInput;
+    }
+    
+    // Reconcile prediction with actual server correction
+    reconcile(predictedTimestamp, actualInput, serverTimestamp) {
+        // Remove acknowledged inputs from history
+        this.history = this.history.filter(h => h.timestamp > predictedTimestamp);
+        
+        // Calculate prediction error
+        if (this.history.length > 0) {
+            const error = Math.abs(this.predictedInput.x - actualInput.x);
+            // High error reduces confidence
+            this.confidence = Math.max(0, this.confidence - error * 2);
+        }
+    }
+}
+
+// ============================================================================
+// LAG COMPENSATION MODULE
+// ============================================================================
+
+class LagCompensator {
+    constructor() {
+        this.stateHistory = []; // History of local states
+        this.maxHistorySize = 60; // ~1 second at 60fps
+        this.latency = 0;
+    }
+    
+    recordLocalState(state, timestamp) {
+        this.stateHistory.push({ state, timestamp });
+        if (this.stateHistory.length > this.maxHistorySize) {
+            this.stateHistory.shift();
+        }
+    }
+    
+    // Rewind to state at a specific time (for server reconciliation)
+    getStateAtTime(targetTime) {
+        // Find closest state
+        const idx = this.stateHistory.findIndex(h => h.timestamp >= targetTime);
+        if (idx === -1) return null;
+        if (idx === 0) return this.stateHistory[0].state;
+        
+        // Interpolate between states
+        const a = this.stateHistory[idx - 1];
+        const b = this.stateHistory[idx];
+        const t = (targetTime - a.timestamp) / (b.timestamp - a.timestamp);
+        
+        return this._interpolateStates(a.state, b.state, t);
+    }
+    
+    // Apply correction from server and replay inputs
+    reconcile(serverState, serverTimestamp, pendingInputs) {
+        // Find state at server processing time
+        const historicalState = this.getStateAtTime(serverTimestamp);
+        if (!historicalState) return serverState;
+        
+        // Calculate error
+        const error = this._calculateError(historicalState, serverState);
+        
+        // If error is small, just accept server state
+        if (error < 0.01) {
+            return this._applyPendingInputs(serverState, pendingInputs);
+        }
+        
+        // For larger errors, snap to server state with smoothing
+        const alpha = 0.3; // Smoothing factor
+        const smoothedState = this._smoothStates(historicalState, serverState, alpha);
+        
+        // Replay pending inputs
+        return this._applyPendingInputs(smoothedState, pendingInputs);
+    }
+    
+    _calculateError(a, b) {
+        let error = 0;
+        if (a.ball && b.ball) {
+            error += Math.abs(a.ball.x - b.ball.x);
+            error += Math.abs(a.ball.y - b.ball.y);
+        }
+        return error;
+    }
+    
+    _applyPendingInputs(state, inputs) {
+        // Apply inputs in order
+        for (const input of inputs) {
+            // Apply input to state (simplified - actual game logic needed)
+            if (input.input && state.paddles) {
+                state.paddles[1] = { x: input.input.x };
+            }
+        }
+        return state;
+    }
+    
+    _smoothStates(a, b, alpha) {
+        const result = { ...a };
+        if (a.ball && b.ball) {
+            result.ball = {
+                x: a.ball.x * (1 - alpha) + b.ball.x * alpha,
+                y: a.ball.y * (1 - alpha) + b.ball.y * alpha
+            };
+        }
+        return result;
+    }
+    
+    _interpolateStates(a, b, t) {
+        const result = { ...a };
+        if (a.ball && b.ball) {
+            result.ball = {
+                x: a.ball.x + (b.ball.x - a.ball.x) * t,
+                y: a.ball.y + (b.ball.y - a.ball.y) * t
+            };
+        }
+        return result;
+    }
+}
+
+// ============================================================================
+// DESYNC DETECTOR
+// ============================================================================
+
+class DesyncDetector {
+    constructor(threshold = 0.05) {
+        this.threshold = threshold; // Position difference threshold
+        this.desyncCount = 0;
+        this.lastDesyncTime = 0;
+        this.desyncHistory = [];
+    }
+    
+    checkForDesync(localState, remoteState, timestamp) {
+        if (!localState || !remoteState) return false;
+        
+        let desyncDetected = false;
+        let desyncMagnitude = 0;
+        
+        // Check ball position
+        if (localState.ball && remoteState.ball) {
+            const dx = localState.ball.x - remoteState.ball.x;
+            const dy = localState.ball.y - remoteState.ball.y;
+            const ballError = Math.sqrt(dx * dx + dy * dy);
+            
+            if (ballError > this.threshold) {
+                desyncDetected = true;
+                desyncMagnitude = ballError;
+            }
+        }
+        
+        // Check paddle positions
+        if (localState.paddles && remoteState.paddles) {
+            for (let i = 0; i < Math.min(localState.paddles.length, remoteState.paddles.length); i++) {
+                const paddleError = Math.abs(localState.paddles[i].x - remoteState.paddles[i].x);
+                if (paddleError > this.threshold) {
+                    desyncDetected = true;
+                    desyncMagnitude = Math.max(desyncMagnitude, paddleError);
+                }
+            }
+        }
+        
+        if (desyncDetected) {
+            const timeSinceLastDesync = timestamp - this.lastDesyncTime;
+            this.lastDesyncTime = timestamp;
+            this.desyncCount++;
+            
+            this.desyncHistory.push({
+                timestamp,
+                magnitude: desyncMagnitude,
+                timeSinceLast: timeSinceLastDesync
+            });
+            
+            // Keep only recent history
+            const cutoff = timestamp - 10000; // 10 seconds
+            this.desyncHistory = this.desyncHistory.filter(d => d.timestamp > cutoff);
+            
+            return {
+                detected: true,
+                magnitude: desyncMagnitude,
+                frequency: this.desyncHistory.length / 10 // per second
+            };
+        }
+        
+        return { detected: false };
+    }
+    
+    shouldForceResync() {
+        // Force resync if desync frequency is too high
+        return this.desyncHistory.length > 5; // More than 5 desyncs in 10 seconds
+    }
+}
 
 // ============================================================================
 // MAIN APPLICATION CLASS
@@ -63,6 +406,41 @@ class ArkanoidP2P {
         this.remoteInput = { x: 0.5, fire: false };
         this.pendingInputs = []; // For guest reconciliation
         
+        // ==================== SYNC ENHANCEMENTS ====================
+        // Jitter buffer for smooth state interpolation
+        this.jitterBuffer = new JitterBuffer({
+            minSize: 2,
+            maxSize: 6,
+            maxDelay: 100 + (network.getLatency?.() || 100),
+            smoothingFactor: 0.3
+        });
+        
+        // Input prediction for guest
+        this.inputPredictor = new InputPredictor();
+        
+        // Lag compensation
+        this.lagCompensator = new LagCompensator();
+        
+        // Desync detection
+        this.desyncDetector = new DesyncDetector(0.05);
+        
+        // State interpolation
+        this.targetState = null;
+        this.currentStateInterpolation = 0;
+        this.stateInterpolationSpeed = 0.15; // Interpolation factor per frame
+        
+        // Delta compression
+        this.lastInputSent = 0;
+        this.inputSendInterval = 1000 / 30; // Send inputs at 30Hz minimum
+        
+        // Sequence numbers for reliability
+        this.inputSequence = 0;
+        this.lastAcknowledgedInput = 0;
+        
+        // Smooth display positions (reduce visual jitter)
+        this.displayPaddlePosition = 0.5;
+        this.displayBallPosition = { x: 0.5, y: 0.5 };
+        
         // Game configuration
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas?.getContext('2d');
@@ -75,7 +453,7 @@ class ArkanoidP2P {
         this.gameLoop = this.gameLoop.bind(this);
         this.handleResize = this.handleResize.bind(this);
         
-        console.log('[Main] Arkanoid P2P initialized');
+        console.log('[Main] Arkanoid P2P initialized with enhanced sync');
     }
     
     // ============================================================================
@@ -249,21 +627,37 @@ class ArkanoidP2P {
         // Block destroyed
         this.game.on('block_destroyed', (data) => {
             this.onBlockDestroyed(data);
+            // Play block destroy sound (deterministic, both players hear it)
+            if (typeof audioSynth !== 'undefined') {
+                audioSynth.blockDestroy(data.block?.hp || 1);
+            }
         });
         
         // Level complete
         this.game.on('level_complete', () => {
             this.onLevelComplete();
+            // Play level complete fanfare
+            if (typeof audioSynth !== 'undefined') {
+                audioSynth.levelComplete();
+            }
         });
         
         // Game over
         this.game.on('game_over', (data) => {
             this.onGameOver(data);
+            // Play game over sound
+            if (typeof audioSynth !== 'undefined') {
+                audioSynth.gameOver();
+            }
         });
         
-        // Power-up collected
-        this.game.on('powerup_collected', (data) => {
+        // Power-up collected (note: event name is 'powerup_collect' from game.js)
+        this.game.on('powerup_collect', (data) => {
             this.onPowerUpCollected(data);
+            // Play power-up pickup sound
+            if (typeof audioSynth !== 'undefined') {
+                audioSynth.powerUp();
+            }
         });
         
         // Ball launched
@@ -386,13 +780,9 @@ class ArkanoidP2P {
         if (action === 'fire') {
             this.localInput.fire = true;
             
-            // If guest, send input immediately to host
+            // If guest, send input immediately to host (bypass throttling for fire)
             if (!this.isHost && this.network) {
-                this.network.send({
-                    type: MESSAGE_TYPES.INPUT,
-                    input: this.localInput,
-                    timestamp: Date.now()
-                });
+                this.sendInput();
             }
             
             // Reset fire after one frame
@@ -403,18 +793,59 @@ class ArkanoidP2P {
     }
     
     setLocalInput(input) {
+        const previousInput = { ...this.localInput };
         this.localInput = { ...this.localInput, ...input };
+        
+        // Record for prediction
+        this.inputPredictor.record(this.localInput);
         
         // Send input to remote if guest
         if (!this.isHost && this.network && this.state === APP_STATES.PLAYING) {
+            // Add to pending for reconciliation
             this.pendingInputs.push({
                 input: { ...this.localInput },
+                sequence: ++this.inputSequence,
                 timestamp: Date.now()
             });
             
+            // Throttle input sending
+            const now = Date.now();
+            if (now - this.lastInputSent >= this.inputSendInterval) {
+                this.sendInput();
+                this.lastInputSent = now;
+            }
+        }
+        
+        // Smooth display position update
+        this.displayPaddlePosition += (this.localInput.x - this.displayPaddlePosition) * 0.5;
+    }
+    
+    sendInput() {
+        if (!this.network) return;
+        
+        // Use delta compression when possible
+        const useDelta = typeof this.network.sendInputDelta === 'function';
+        
+        if (useDelta) {
+            const sent = this.network.sendInputDelta({
+                ...this.localInput,
+                sequence: this.inputSequence
+            });
+            
+            // Fall back to full input if delta wasn't sent (no change)
+            if (!sent) {
+                this.network.send({
+                    type: MESSAGE_TYPES.INPUT,
+                    input: this.localInput,
+                    sequence: this.inputSequence,
+                    timestamp: Date.now()
+                });
+            }
+        } else {
             this.network.send({
                 type: MESSAGE_TYPES.INPUT,
                 input: this.localInput,
+                sequence: this.inputSequence,
                 timestamp: Date.now()
             });
         }
@@ -482,6 +913,17 @@ class ArkanoidP2P {
         // Reset input states
         this.localInput = { x: 0.5, fire: false };
         this.remoteInput = { x: 0.5, fire: false };
+        this.displayPaddlePosition = 0.5;
+        this.displayBallPosition = { x: 0.5, y: 0.5 };
+        
+        // Reset sync systems
+        this.jitterBuffer.clear();
+        this.pendingInputs = [];
+        this.inputSequence = 0;
+        this.lastAcknowledgedInput = 0;
+        this.inputPredictor = new InputPredictor();
+        this.lagCompensator = new LagCompensator();
+        this.desyncDetector = new DesyncDetector(0.05);
         
         // Set player roles in game engine
         this.game.setPlayerRole(this.isHost, this.playerNum);
@@ -562,7 +1004,7 @@ class ArkanoidP2P {
             case MESSAGE_TYPES.STATE:
                 // Host state update
                 if (!this.isHost) {
-                    this.applyRemoteState(message.data);
+                    this.handleRemoteState(message);
                 }
                 break;
                 
@@ -570,6 +1012,61 @@ class ArkanoidP2P {
                 // Guest input
                 if (this.isHost) {
                     this.setRemoteInput(message.input);
+                    // Send acknowledgment
+                    this.network?.send({
+                        type: MESSAGE_TYPES.STATE_ACK,
+                        lastProcessedInput: message.sequence,
+                        timestamp: Date.now()
+                    });
+                }
+                break;
+                
+            case MESSAGE_TYPES.INPUT_DELTA:
+                // Delta-compressed guest input
+                if (this.isHost && message.delta) {
+                    // Reconstruct full input from delta
+                    const fullX = message.fullX || (this.remoteInput.x + message.delta.dx);
+                    this.setRemoteInput({
+                        x: fullX,
+                        fire: message.delta.fire !== undefined ? message.delta.fire : this.remoteInput.fire,
+                        sequence: message.delta.seq
+                    });
+                    // Send acknowledgment
+                    this.network?.send({
+                        type: MESSAGE_TYPES.STATE_ACK,
+                        lastProcessedInput: message.delta.seq,
+                        timestamp: Date.now()
+                    });
+                }
+                break;
+                
+            case MESSAGE_TYPES.STATE_ACK:
+                // Input acknowledgment from host
+                if (!this.isHost && message.lastProcessedInput) {
+                    this.lastAcknowledgedInput = message.lastProcessedInput;
+                    // Remove acknowledged inputs
+                    this.pendingInputs = this.pendingInputs.filter(
+                        input => input.sequence > message.lastProcessedInput
+                    );
+                    // Update predictor
+                    this.inputPredictor.reconcile(
+                        message.timestamp,
+                        this.localInput,
+                        message.timestamp
+                    );
+                }
+                break;
+                
+            case MESSAGE_TYPES.DESYNC_CHECK:
+                // Desync detection check
+                if (message.checksum) {
+                    const localChecksum = this.calculateGameStateChecksum();
+                    if (localChecksum !== message.checksum) {
+                        console.warn('[Main] Desync detected! Requesting state sync...');
+                        if (this.isHost) {
+                            this.sendGameState();
+                        }
+                    }
                 }
                 break;
                 
@@ -680,33 +1177,73 @@ class ArkanoidP2P {
     }
     
     // ============================================================================
-    // STATE SYNCHRONIZATION
+    // STATE SYNCHRONIZATION WITH JITTER BUFFER & INTERPOLATION
     // ============================================================================
     
     sendGameState() {
         if (!this.isHost || !this.game) return;
         
         const state = this.game.getFullState();
+        const timestamp = Date.now();
+        
         this.network?.send({
             type: MESSAGE_TYPES.STATE,
             data: state,
-            timestamp: Date.now()
+            timestamp: timestamp,
+            sequence: Math.floor(timestamp / 50) // ~20Hz sequence
         });
         
-        this.lastStateUpdate = Date.now();
+        this.lastStateUpdate = timestamp;
+        
+        // Send periodic desync check
+        if (Math.random() < 0.1) { // 10% chance
+            this.network?.send({
+                type: MESSAGE_TYPES.DESYNC_CHECK,
+                checksum: this.calculateGameStateChecksum(),
+                timestamp: timestamp
+            });
+        }
+    }
+    
+    calculateGameStateChecksum() {
+        // Simple checksum for desync detection
+        const state = this.game?.getFullState();
+        if (!state) return 0;
+        
+        let checksum = 0;
+        if (state.ball) {
+            checksum += Math.floor(state.ball.x * 100) ^ Math.floor(state.ball.y * 100);
+        }
+        if (state.paddles) {
+            checksum += Math.floor(state.paddles[0]?.x * 100 || 0);
+            checksum += Math.floor(state.paddles[1]?.x * 100 || 0) << 8;
+        }
+        return checksum & 0xFFFF;
+    }
+    
+    handleRemoteState(message) {
+        if (this.isHost || !this.game) return;
+        
+        const { data: state, timestamp, sequence } = message;
+        
+        // Add to jitter buffer
+        this.jitterBuffer.add(state, timestamp, sequence || 0);
+        
+        // Cache for interpolation
+        this.targetState = state;
     }
     
     applyRemoteState(state) {
-        if (this.isHost || !this.game) return;
-        
-        // Apply state reconciliation
-        this.game.reconcileState(state);
-        
-        // Remove acknowledged inputs from pending queue
-        if (state.lastProcessedInput) {
-            this.pendingInputs = this.pendingInputs.filter(
-                input => input.timestamp > state.lastProcessedInput
+        // Apply state reconciliation with lag compensation
+        if (this.pendingInputs.length > 0 && this.lagCompensator) {
+            const reconciled = this.lagCompensator.reconcile(
+                state,
+                Date.now() - this.network.getLatency(),
+                this.pendingInputs
             );
+            this.game.reconcileState(reconciled);
+        } else {
+            this.game.reconcileState(state);
         }
     }
     
@@ -757,13 +1294,62 @@ class ArkanoidP2P {
                 this.game.setPaddlePosition(2, this.remoteInput.x);
                 this.game.setInput(2, this.remoteInput.fire);
             } else {
+                // Guest: Use predicted input locally
+                const predictedInput = this.inputPredictor.predict(dt);
                 this.game.setPaddlePosition(1, this.remoteInput.x);
-                this.game.setPaddlePosition(2, this.localInput.x);
+                this.game.setPaddlePosition(2, predictedInput.x);
                 this.game.setInput(2, this.localInput.fire);
+            }
+            
+            // Get smoothed state from jitter buffer for guest
+            if (!this.isHost && this.targetState) {
+                const bufferedState = this.jitterBuffer.get();
+                if (bufferedState) {
+                    this.applyRemoteState(bufferedState);
+                } else {
+                    // Interpolate towards target state
+                    this.currentStateInterpolation = Math.min(
+                        1,
+                        this.currentStateInterpolation + this.stateInterpolationSpeed
+                    );
+                    const interpolatedState = this.jitterBuffer.interpolate(
+                        this.currentStateInterpolation
+                    );
+                    if (interpolatedState) {
+                        this.applyRemoteState(interpolatedState);
+                    }
+                }
+            }
+            
+            // Check for desyncs
+            if (!this.isHost && this.targetState) {
+                const currentGameState = this.game.getFullState();
+                const desyncResult = this.desyncDetector.checkForDesync(
+                    currentGameState,
+                    this.targetState,
+                    Date.now()
+                );
+                
+                if (desyncResult.detected) {
+                    console.warn(`[Main] Desync detected: magnitude=${desyncResult.magnitude.toFixed(3)}, frequency=${desyncResult.frequency.toFixed(2)}/s`);
+                    
+                    if (this.desyncDetector.shouldForceResync()) {
+                        // Force immediate state application
+                        this.applyRemoteState(this.targetState);
+                    }
+                }
             }
             
             // Update game
             this.game.update(dtSeconds);
+            
+            // Record state for lag compensation
+            if (!this.isHost) {
+                this.lagCompensator.recordLocalState(
+                    this.game.getFullState(),
+                    Date.now()
+                );
+            }
         }
     }
     
@@ -786,6 +1372,15 @@ class ArkanoidP2P {
         if (this.isHost && this.networkTickAccumulator >= this.stateUpdateInterval) {
             this.sendGameState();
             this.networkTickAccumulator = 0;
+        }
+        
+        // Guest sends inputs more frequently (throttled in setLocalInput)
+        if (!this.isHost && this.pendingInputs.length > 0) {
+            const now = Date.now();
+            if (now - this.lastInputSent >= this.inputSendInterval) {
+                this.sendInput();
+                this.lastInputSent = now;
+            }
         }
     }
     
@@ -822,6 +1417,25 @@ class ArkanoidP2P {
                 this.ui?.drawVictoryScreen(this.ctx, this.game?.getScore());
                 break;
         }
+        
+        // Render network debug info if needed
+        if (this.state === APP_STATES.PLAYING && this.network) {
+            this.renderNetworkDebug();
+        }
+    }
+    
+    renderNetworkDebug() {
+        const stats = this.network.getNetworkStats?.() || {};
+        const latency = stats.latency || 0;
+        const jitter = stats.jitter || 0;
+        
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        this.ctx.fillRect(5, 5, 120, 50);
+        this.ctx.fillStyle = '#0f0';
+        this.ctx.font = '12px monospace';
+        this.ctx.fillText(`Ping: ${latency}ms`, 10, 20);
+        this.ctx.fillText(`Jitter: ${jitter.toFixed(1)}ms`, 10, 35);
+        this.ctx.fillText(`Inputs: ${this.pendingInputs.length}`, 10, 50);
     }
     
     // ============================================================================
@@ -877,6 +1491,7 @@ class ArkanoidP2P {
         this.pendingInputs = [];
         this.localInput = { x: 0.5, fire: false };
         this.remoteInput = { x: 0.5, fire: false };
+        this.jitterBuffer?.clear();
     }
     
     // ============================================================================
@@ -954,4 +1569,4 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
-console.log('[Main] main.js loaded');
+console.log('[Main] main.js loaded with enhanced P2P sync');
