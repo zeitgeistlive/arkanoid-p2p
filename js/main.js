@@ -617,7 +617,9 @@ class ArkanoidP2P {
             onGamePause: () => this.pauseGame(),
             onGameResume: () => this.resumeGame(),
             onGameRestart: () => this.restartGame(),
-            onGameQuit: () => this.returnToMenu()
+            onGameQuit: () => this.returnToMenu(),
+            onPaddleMove: (x, source) => this.setLocalInput({ x: clamp(x / GAME_CONFIG.canvas.width, 0, 1) }),
+            onLaunchBall: () => this.handleInputAction('fire')
         });
     }
     
@@ -1220,7 +1222,7 @@ class ArkanoidP2P {
             
             // Load next level after short delay
             setTimeout(() => {
-                this.game.loadLevel(levelData);
+                this.game.init(levelData);
                 this.ui?.showLevelStart(nextLevelIndex + 1, levelData.name);
             }, 1000);
         }
@@ -1373,11 +1375,15 @@ class ArkanoidP2P {
             if (this.isHost) {
                 this.game.setInput(1, this.localInput.x);
                 this.game.setInput(2, this.remoteInput.x);
+                if (this.localInput.fire) this.game.launchBall(1);
+                if (this.remoteInput.fire) this.game.launchBall(2);
             } else {
                 // Guest: Use predicted input locally
                 const predictedInput = this.inputPredictor.predict(dt);
                 this.game.setInput(1, this.remoteInput.x);
                 this.game.setInput(2, predictedInput.x);
+                if (this.remoteInput.fire) this.game.launchBall(1);
+                if (this.localInput.fire) this.game.launchBall(2);
             }
             
             // Get smoothed state from jitter buffer for guest
@@ -1610,7 +1616,7 @@ class ArkanoidP2P {
         } else if (message.level !== undefined) {
             LevelManager.currentLevel = message.level;
             const levelData = this.levels.getLevel(message.level);
-            this.game.loadLevel(levelData);
+            this.game.init(levelData);
         }
     }
     
