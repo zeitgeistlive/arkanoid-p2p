@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="GOP-STOP ARKANOID - P2P Cooperative Breakout Game">
+  <title>GOP-STOP ARKANOID</title>
+  
+  <!-- Google Fonts - Retro Gaming Style -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Russo+One&family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+  
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ============================================
+       MAIN GAME CONTAINER
+       ============================================ -->
+  <div id="game-container">
+    
+    <!-- ==========================================
+         SCREEN: MAIN MENU
+         ========================================== -->
+    <section id="screen-menu" class="screen active">
+      <div class="logo">
+        <h1 class="glitch" data-text="GOP-STOP">GOP-STOP</h1>
+        <div class="logo__subtitle">◆ ARKANOID ◆</div>
+      </div>
+      
+      <div class="menu-buttons">
+        <button class="btn btn--large" id="btn-create-room">
+          CREATE ROOM
+        </button>
+        <button class="btn btn--large btn--magenta" id="btn-join-room">
+          JOIN ROOM
+        </button>
+        <button class="btn btn--small" id="btn-help" style="margin-top: 20px;">
+          HOW TO PLAY
+        </button>
+      </div>
+      
+      <div class="version-tag">v1.0.0 // P2P EDITION</div>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: ROOM CREATION
+         ========================================== -->
+    <section id="screen-room" class="screen">
+      <div class="room-container">
+        <!-- Create Room Section -->
+        <div class="room-section" id="create-section">
+          <h2>CREATE ROOM</h2>
+          <p style="color: #888; margin-bottom: var(--space-md);">
+            Generate a room code and share it with your comrade
+          </p>
+          <button class="btn btn--large" id="btn-generate-code">
+            GENERATE CODE
+          </button>
+        </div>
+        
+        <!-- Join Room Section -->
+        <div class="room-section hidden" id="join-section">
+          <h2>JOIN ROOM</h2>
+          <p style="color: #888; margin-bottom: var(--space-md);">
+            Enter the room code from your comrade
+          </p>
+          <div style="margin-bottom: var(--space-md);">
+            <input 
+              type="text" 
+              class="input" 
+              id="room-code-input" 
+              placeholder="ENTER CODE"
+              maxlength="8"
+              autocomplete="off"
+            >
+          </div>
+          <button class="btn btn--large btn--magenta" id="btn-connect">
+            CONNECT
+          </button>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <!-- Room Code Display -->
+        <div class="room-code-display hidden" id="code-display">
+          <div class="room-code-label">YOUR ROOM CODE</div>
+          <div class="room-code" id="generated-code">--------</div>
+          <button class="btn btn--small" id="btn-copy-code" style="margin-top: 10px;">
+            COPY TO CLIPBOARD
+          </button>
+        </div>
+        
+        <!-- Connection Status -->
+        <div class="connection-status">
+          <div class="status-dot" id="connection-dot"></div>
+          <span id="connection-text">WAITING FOR CONNECTION...</span>
+        </div>
+        
+        <!-- Back Button -->
+        <button class="btn" id="btn-back-to-menu" style="margin-top: var(--space-md); width: 100%;">
+          BACK TO MENU
+        </button>
+      </div>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: GAME HUD
+         ========================================== -->
+    <section id="screen-game" class="screen">
+      <div class="game-layout">
+        <!-- HUD Header -->
+        <header class="hud">
+          <div class="hud-section">
+            <div class="hud-item">
+              <div class="hud-label">SCORE</div>
+              <div class="hud-value" id="score-display">000000</div>
+            </div>
+            <div class="hud-item">
+              <div class="hud-label">LEVEL</div>
+              <div class="hud-value" id="level-display">01</div>
+            </div>
+          </div>
+          
+          <div class="hud-section">
+            <div class="player-indicator player-indicator--active" id="player-1-indicator">
+              <span class="player-indicator__num">P1</span>
+              <span class="player-indicator__name">YOU</span>
+              <span class="player-indicator__status"></span>
+            </div>
+            <div class="player-indicator" id="player-2-indicator">
+              <span class="player-indicator__num">P2</span>
+              <span class="player-indicator__name">COMRADE</span>
+              <span class="player-indicator__status"></span>
+            </div>
+          </div>
+          
+          <div class="hud-section">
+            <div class="hud-item">
+              <div class="hud-label">LIVES</div>
+              <div class="hud-value text-magenta" id="lives-display">♥♥♥</div>
+            </div>
+            <button class="btn btn--small" id="btn-pause">PAUSE</button>
+          </div>
+        </header>
+        
+        <!-- Game Canvas -->
+        <div class="canvas-container">
+          <canvas id="gameCanvas" width="800" height="600"></canvas>
+          <div class="canvas-border"></div>
+        </div>
+      </div>
+      
+      <!-- Touch Controls for Mobile -->
+      <div class="touch-controls">
+        <button class="touch-btn" id="touch-left">←</button>
+        <button class="touch-btn" id="touch-right">→</button>
+      </div>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: LEVEL COMPLETE
+         ========================================== -->
+    <section id="screen-level-complete" class="screen">
+      <div class="end-screen-content">
+        <h2 class="end-screen-title">LEVEL COMPLETE!</h2>
+        
+        <div class="stats-display">
+          <div class="stat-item">
+            <div class="stat-value" id="level-score">0</div>
+            <div class="stat-label">Level Score</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="level-blocks">0</div>
+            <div class="stat-label">Blocks Destroyed</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="level-time">00:00</div>
+            <div class="stat-label">Time</div>
+          </div>
+        </div>
+        
+        <p style="margin-bottom: var(--space-lg); color: #888;">
+          Excellent work, comrade! Ready for next level?
+        </p>
+        
+        <button class="btn btn--large btn--yellow" id="btn-next-level">
+          NEXT LEVEL
+        </button>
+      </div>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: GAME OVER
+         ========================================== -->
+    <section id="screen-game-over" class="screen">
+      <div class="end-screen-content">
+        <h2 class="end-screen-title glitch" data-text="GAME OVER">GAME OVER</h2>
+        
+        <div class="stats-display">
+          <div class="stat-item">
+            <div class="stat-value" id="final-score">0</div>
+            <div class="stat-label">Final Score</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="final-level">1</div>
+            <div class="stat-label">Level Reached</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="high-score">0</div>
+            <div class="stat-label">High Score</div>
+          </div>
+        </div>
+        
+        <p style="margin-bottom: var(--space-lg); color: #888;">
+          Mission failed. The revolution continues...
+        </p>
+        
+        <div style="display: flex; gap: var(--space-md); flex-wrap: wrap; justify-content: center;">
+          <button class="btn btn--large" id="btn-retry">
+            TRY AGAIN
+          </button>
+          <button class="btn btn--large btn--magenta" id="btn-main-menu">
+            MAIN MENU
+          </button>
+        </div>
+      </div>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: PAUSE
+         ========================================== -->
+    <section id="screen-pause" class="screen" style="background: rgba(10, 10, 10, 0.9);">
+      <div class="end-screen-content" style="border-color: var(--neon-cyan);">
+        <h2 style="color: var(--neon-cyan); text-shadow: var(--glow-medium) var(--neon-cyan);">
+          PAUSED
+        </h2>
+        <div style="margin: var(--space-xl) 0;">
+          <button class="btn btn--large" id="btn-resume" style="margin-bottom: var(--space-md);">
+            RESUME
+          </button>
+          <br>
+          <button class="btn" id="btn-quit-game">
+            QUIT TO MENU
+          </button>
+        </div>
+      </div>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: LOADING
+         ========================================== -->
+    <section id="screen-loading" class="screen">
+      <div class="loading">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-text">CONNECTING...</div>
+      </div>
+    </section>
+    
+    <!-- ==========================================
+         SCREEN: HELP / INSTRUCTIONS
+         ========================================== -->
+    <section id="screen-help" class="screen">
+      <div class="room-container" style="max-width: 600px;">
+        <h2>HOW TO PLAY</h2>
+        
+        <div style="text-align: left; margin: var(--space-lg) 0; line-height: 1.8;">
+          <h3 style="color: var(--neon-cyan);">◆ CONTROLS</h3>
+          <p style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary);">
+            <strong>← → Arrow Keys / A D:</strong> Move paddle<br>
+            <strong>SPACE:</strong> Launch ball / Pause
+          </p>
+          
+          <h3 style="color: var(--neon-magenta);">◆ OBJECTIVE</h3>
+          <p style="margin-bottom: var(--space-md); padding: var(--space-sm); background: var(--bg-primary);">
+            Cooperate with your comrade to destroy all blocks.<br>
+            Two paddles, one ball, shared lives!<br>
+            Don't let the ball fall below the paddles.
+          </p>
+          
+          <h3 style="color: var(--neon-yellow);">◆ MULTIPLAYER</h3>
+          <p style="padding: var(--space-sm); background: var(--bg-primary);">
+            Create a room and share the code with a friend.<br>
+            Or join using their room code.<br>
+            Connection is P2P via WebRTC - no servers needed!
+          </p>
+        </div>
+        
+        <button class="btn btn--large" id="btn-help-back" style="width: 100%;">
+          BACK
+        </button>
+      </div>
+    </section>
+    
+  </div>
+
+  <!-- ============================================
+       JAVASCRIPT
+       ============================================ -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="js/network.js"></script>
+  <script src="js/levels.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+  
+  <!-- Screen management helper (will be expanded by game.js) -->
+  <script>
+    // Screen navigation helper
+    window.showScreen = function(screenId) {
+      document.querySelectorAll('.screen').forEach(screen => {
+        screen.classList.remove('active');
+      });
+      document.getElementById(screenId).classList.add('active');
+    };
+    
+    // Button event listeners for navigation
+    document.addEventListener('DOMContentLoaded', () => {
+      // Main Menu
+      document.getElementById('btn-create-room')?.addEventListener('click', () => {
+        document.getElementById('create-section').classList.remove('hidden');
+        document.getElementById('join-section').classList.add('hidden');
+        showScreen('screen-room');
+      });
+      
+      document.getElementById('btn-join-room')?.addEventListener('click', () => {
+        document.getElementById('create-section').classList.add('hidden');
+        document.getElementById('join-section').classList.remove('hidden');
+        document.getElementById('code-display')?.classList.add('hidden');
+        showScreen('screen-room');
+      });
+      
+      document.getElementById('btn-help')?.addEventListener('click', () => {
+        showScreen('screen-help');
+      });
+      
+      // Room Screen
+      document.getElementById('btn-back-to-menu')?.addEventListener('click', () => {
+        showScreen('screen-menu');
+      });
+      
+      // Help Screen
+      document.getElementById('btn-help-back')?.addEventListener('click', () => {
+        showScreen('screen-menu');
+      });
+      
+      // Pause Screen
+      document.getElementById('btn-pause')?.addEventListener('click', () => {
+        showScreen('screen-pause');
+      });
+      
+      document.getElementById('btn-resume')?.addEventListener('click', () => {
+        showScreen('screen-game');
+      });
+      
+      document.getElementById('btn-quit-game')?.addEventListener('click', () => {
+        showScreen('screen-menu');
+      });
+      
+      // Game Over Screen
+      document.getElementById('btn-main-menu')?.addEventListener('click', () => {
+        showScreen('screen-menu');
+      });
+      
+      // Generate code demo
+      document.getElementById('btn-generate-code')?.addEventListener('click', () => {
+        const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+        document.getElementById('generated-code').textContent = code;
+        document.getElementById('code-display').classList.remove('hidden');
+        document.getElementById('connection-dot').classList.add('status-dot--waiting');
+        document.getElementById('connection-text').textContent = 'WAITING FOR PLAYER 2...';
+      });
+      
+      // Copy code
+      document.getElementById('btn-copy-code')?.addEventListener('click', () => {
+        const code = document.getElementById('generated-code').textContent;
+        navigator.clipboard.writeText(code);
+        const btn = document.getElementById('btn-copy-code');
+        const originalText = btn.textContent;
+        btn.textContent = 'COPIED!';
+        setTimeout(() => btn.textContent = originalText, 2000);
+      });
+    });
+  </script>
+  
+</body>
+</html>
