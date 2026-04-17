@@ -975,6 +975,7 @@ class ArkanoidP2P {
         this.game.setHost(this.isHost);
         
         this.transitionTo(APP_STATES.PLAYING);
+        this.ui?.showScreen('GAME'); // <<< SHOW GAME UI
         this.lastFrameTime = performance.now();
         
         console.log('[Main] Game started');
@@ -1026,8 +1027,10 @@ class ArkanoidP2P {
             this.ui?.showToast('Player connected! Starting game...', 'success');
             setTimeout(() => this.startGame(), 2000);
         } else {
-            // Guest waits for host to start
-            this.ui?.setLoadingText('WAITING FOR HOST TO START...');
+            // Guest waits for host to start, but we can transition to GAME screen and wait for states
+            this.ui?.setLoadingText('CONNECTED! STARTING GAME...');
+            this.ui?.showToast('Connected to host! Starting game...', 'success');
+            setTimeout(() => this.startGame(), 2000);
         }
     }
     
